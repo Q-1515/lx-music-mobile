@@ -46,9 +46,9 @@ const LeftHeader = () => {
         <TouchableOpacity style={styles.btn} onPress={openMenu}>
           <Icon color={theme['c-font']} name="menu" size={18} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.titleBtn} onPress={openMenu}>
+        <View style={styles.titleBtn}>
           <Text style={styles.leftTitle} size={18}>{t(id)}</Text>
-        </TouchableOpacity>
+        </View>
       </View>
       {headerComponents[id] ?? null}
 
@@ -72,9 +72,6 @@ const RightHeader = () => {
   const id = useNavActiveId()
   const statusBarHeight = useStatusbarHeight()
 
-  const openMenu = () => {
-    global.app_event.changeMenuVisible(true)
-  }
   return (
     <View style={{
       ...styles.container,
@@ -82,9 +79,9 @@ const RightHeader = () => {
       paddingTop: statusBarHeight,
     }}>
       <View style={styles.left}>
-        <TouchableOpacity style={styles.titleBtn} onPress={openMenu}>
+        <View style={styles.titleBtn}>
           <Text style={styles.rightTitle} size={18}>{t(id)}</Text>
-        </TouchableOpacity>
+        </View>
       </View>
       {headerComponents[id] ?? null}
       <TouchableOpacity style={styles.btn} onPress={openMenu}>

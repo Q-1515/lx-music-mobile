@@ -21,6 +21,20 @@ export const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
 }
 
+const normalizeUri = (url?: string | number | null) => {
+  if (typeof url != 'string') return url
+  if (!url) return url
+  if (url.startsWith('/')) return 'file://' + url
+
+  let uri = url.trim()
+
+  if (uri.startsWith('//')) uri = 'https:' + uri
+  if (uri.startsWith('http://')) uri = uri.replace(/^http:\/\//, 'https://')
+  if (uri.includes('{size}')) uri = uri.replace(/\{size\}/g, '400')
+
+  return encodeURI(uri)
+}
+
 const EmptyPic = memo(({ style, nativeID }: { style: ImageProps['style'], nativeID: ImageProps['nativeID'] }) => {
   const theme = useTheme()
   const { onLayout, width } = useLayout()
@@ -45,9 +59,7 @@ const Image = memo(({ url, cache, resizeMode = 'cover', style, onError, nativeID
   }, [url])
   let uri = typeof url == 'number'
     ? FastImage.resolveAssetSource(url).uri
-    : url?.startsWith('/')
-      ? 'file://' + url
-      : url
+    : normalizeUri(url) as string | undefined
   const showDefault = useMemo(() => !uri || isError, [isError, uri])
   return (
     showDefault ? <EmptyPic style={style} nativeID={nativeID} />
@@ -74,7 +86,7 @@ const Image = memo(({ url, cache, resizeMode = 'cover', style, onError, nativeID
 })
 
 export const getSize = (uri: string, success: (width: number, height: number) => void, failure?: (error: any) => void) => {
-  FastImage.getSize(uri, success, failure)
+  FastImage.getSize(normalizeUri(uri) as string, success, failure)
 }
 export const clearMemoryCache = async() => {
   // return Promise.all([FastImage.clearMemoryCache(), FastImage.clearDiskCache()])

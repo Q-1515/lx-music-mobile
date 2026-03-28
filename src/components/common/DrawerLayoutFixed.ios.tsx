@@ -84,22 +84,31 @@ const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({
         {children}
       </View>
       {
-        visible && drawerWidth
+        drawerWidth
           ? (
-              <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}>
-                <Animated.View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, opacity: overlayOpacity }}>
+              <View
+                pointerEvents={visible ? 'auto' : 'box-none'}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+              >
+                <Animated.View
+                  pointerEvents={visible ? 'auto' : 'none'}
+                  style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, opacity: overlayOpacity }}
+                >
                   <Pressable onPress={closeDrawer} style={{ flex: 1, backgroundColor: '#000' }} />
                 </Animated.View>
-                <Animated.View style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  width: drawerWidth,
-                  backgroundColor: drawerBackgroundColor,
-                  transform: [{ translateX: drawerTranslate }],
-                  left: drawerPosition == 'left' ? 0 : undefined,
-                  right: drawerPosition == 'right' ? 0 : undefined,
-                }}>
+                <Animated.View
+                  pointerEvents={visible ? 'auto' : 'none'}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    width: drawerWidth,
+                    backgroundColor: drawerBackgroundColor,
+                    transform: [{ translateX: drawerTranslate }],
+                    left: drawerPosition == 'left' ? 0 : undefined,
+                    right: drawerPosition == 'right' ? 0 : undefined,
+                  }}
+                >
                   {renderNavigationView()}
                 </Animated.View>
               </View>

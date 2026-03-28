@@ -289,7 +289,12 @@ static NSString *LXAES(NSString *dataBase64, NSString *keyBase64, NSString *ivBa
   }
 
   BOOL isCBC = [mode isEqualToString:@"AES/CBC/PKCS7Padding"];
-  CCOptions options = isCBC ? kCCOptionPKCS7Padding : kCCOptionECBMode;
+  // Android uses Cipher.getInstance("AES") for this mode, which applies ECB with PKCS padding.
+  // Match that behavior on iOS so encrypted requests produce the same payloads cross-platform.
+  BOOL usesAndroidCompatibleECBPadding = [mode isEqualToString:@"AES"];
+  CCOptions options = 0;
+  if (isCBC || usesAndroidCompatibleECBPadding) options |= kCCOptionPKCS7Padding;
+  if (!isCBC) options |= kCCOptionECBMode;
 
   char ivBuffer[kCCBlockSizeAES128] = { 0 };
   if (isCBC && iv.length > 0) {

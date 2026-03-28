@@ -42,6 +42,7 @@ const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({
   const openDrawer = useCallback(() => {
     if (!drawerWidth) return
     setVisible(true)
+    global.app_event.changeHomePageScrollEnabled(false)
     Animated.timing(animation, {
       toValue: 1,
       duration: 220,
@@ -56,6 +57,7 @@ const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (finished) setVisible(false)
+      global.app_event.changeHomePageScrollEnabled(true)
     })
   }, [animation])
 

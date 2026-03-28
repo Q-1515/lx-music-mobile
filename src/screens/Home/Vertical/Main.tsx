@@ -196,6 +196,7 @@ const indexMap = [
 const Main = () => {
   const pagerViewRef = useRef<ComponentRef<typeof PagerView>>(null)
   let activeIndexRef = useRef(viewMap[commonState.navActiveId])
+  const [scrollEnabled, setScrollEnabled] = useState(settingState.setting['common.homePageScroll'])
   // const isScrollingRef = useRef(false)
   // const scrollPositionRef = useRef(-1)
 
@@ -252,14 +253,19 @@ const Main = () => {
     }
     const handleConfigUpdate = (keys: Array<keyof LX.AppSetting>, setting: Partial<LX.AppSetting>) => {
       if (!keys.includes('common.homePageScroll')) return
-      pagerViewRef.current?.setScrollEnabled(setting['common.homePageScroll']!)
+      setScrollEnabled(setting['common.homePageScroll']!)
+    }
+    const handleHomePageScrollEnabled = (enabled: boolean) => {
+      setScrollEnabled(enabled ? settingState.setting['common.homePageScroll'] : false)
     }
     // window.requestAnimationFrame(() => pagerViewRef.current && pagerViewRef.current.setPage(activeIndexRef.current))
     global.state_event.on('navActiveIdUpdated', handleUpdate)
     global.state_event.on('configUpdated', handleConfigUpdate)
+    global.app_event.on('changeHomePageScrollEnabled', handleHomePageScrollEnabled)
     return () => {
       global.state_event.off('navActiveIdUpdated', handleUpdate)
       global.state_event.off('configUpdated', handleConfigUpdate)
+      global.app_event.off('changeHomePageScrollEnabled', handleHomePageScrollEnabled)
     }
   }, [])
 
@@ -271,7 +277,7 @@ const Main = () => {
       offscreenPageLimit={1}
       onPageSelected={onPageSelected}
       onPageScrollStateChanged={onPageScrollStateChanged}
-      scrollEnabled={settingState.setting['common.homePageScroll']}
+      scrollEnabled={scrollEnabled}
       style={styles.pagerView}
     >
       <View collapsable={false} key="nav_search" style={styles.pageStyle}>

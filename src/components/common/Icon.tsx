@@ -21,7 +21,7 @@ import { StyleSheet, type StyleProp, type TextStyle } from 'react-native'
 // import IconSimpleLineIcons from 'react-native-vector-icons/SimpleLineIcons'
 
 
-const IcoMoon = createIconSetFromIcoMoon(icoMoonConfig)
+const IcoMoon = createIconSetFromIcoMoon(icoMoonConfig, 'icomoon', 'icomoon.ttf')
 
 
 // https://oblador.github.io/react-native-vector-icons/

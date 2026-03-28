@@ -1,5 +1,5 @@
 // import { useEffect, useState } from 'react'
-import { View } from 'react-native'
+import { Platform, SafeAreaView, View } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
 import ImageBackground from '@/components/common/ImageBackground'
 import { useWindowSize } from '@/utils/hooks'
@@ -14,6 +14,11 @@ interface Props {
 }
 
 const BLUR_RADIUS = Math.max(scaleSizeAbsHR(18), 10)
+
+const ContentContainer = ({ children }: Props) => {
+  if (Platform.OS == 'ios') return <SafeAreaView style={{ flex: 1 }}>{children}</SafeAreaView>
+  return <>{children}</>
+}
 
 export default ({ children }: Props) => {
   const theme = useTheme()
@@ -47,9 +52,11 @@ export default ({ children }: Props) => {
         resizeMode="cover"
       >
       </ImageBackground>
-      <View style={{ flex: 1, flexDirection: 'column', backgroundColor: theme['c-main-background'] }}>
-        {children}
-      </View>
+      <ContentContainer>
+        <View style={{ flex: 1, flexDirection: 'column', backgroundColor: theme['c-main-background'] }}>
+          {children}
+        </View>
+      </ContentContainer>
     </View>
   ), [children, theme, windowSize.height, windowSize.width])
   const picComponent = useMemo(() => {
@@ -63,9 +70,11 @@ export default ({ children }: Props) => {
         >
           <View style={{ flex: 1, flexDirection: 'column', backgroundColor: theme['c-content-background'], opacity: 0.76 }}></View>
         </ImageBackground>
-        <View style={{ flex: 1, flexDirection: 'column' }}>
-          {children}
-        </View>
+        <ContentContainer>
+          <View style={{ flex: 1, flexDirection: 'column' }}>
+            {children}
+          </View>
+        </ContentContainer>
       </View>
     )
   }, [children, pic, theme, windowSize.height, windowSize.width])

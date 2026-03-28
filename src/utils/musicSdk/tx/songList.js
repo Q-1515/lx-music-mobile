@@ -293,10 +293,10 @@ export default {
 
   search(text, page, limit = 20, retryNum = 0) {
     if (retryNum > 5) throw new Error('max retry')
-    return httpFetch(`https://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=${page - 1}&num_per_page=${limit}&format=json&query=${encodeURIComponent(text)}&remoteplace=txt.yqq.playlist&inCharset=utf8&outCharset=utf-8`, {
+    return httpFetch(`http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=${page - 1}&num_per_page=${limit}&format=json&query=${encodeURIComponent(text)}&remoteplace=txt.yqq.playlist&inCharset=utf8&outCharset=utf-8`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
-        Referer: 'https://y.qq.com/portal/search.html',
+        Referer: 'http://y.qq.com/portal/search.html',
       },
     })
       .promise.then(({ body }) => {

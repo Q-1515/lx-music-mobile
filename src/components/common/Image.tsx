@@ -29,7 +29,6 @@ const normalizeUri = (url?: string | number | null) => {
   let uri = url.trim()
 
   if (uri.startsWith('//')) uri = 'https:' + uri
-  if (uri.startsWith('http://')) uri = uri.replace(/^http:\/\//, 'https://')
   if (uri.includes('{size}')) uri = uri.replace(/\{size\}/g, '400')
 
   return encodeURI(uri)

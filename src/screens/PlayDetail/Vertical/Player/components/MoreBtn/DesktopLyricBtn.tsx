@@ -5,11 +5,13 @@ import { memo, useRef } from 'react'
 import { toggleDesktopLyricLock } from '@/core/desktopLyric'
 import { updateSetting } from '@/core/common'
 import settingState from '@/store/setting/state'
+import { isDesktopLyricSupported } from '@/utils/nativeModules/lyricDesktop'
 
 
 export default memo(() => {
   const enabledLyric = useSettingValue('desktopLyric.enable')
   const desktopLyricEnableRef = useRef<DesktopLyricEnableType>(null)
+  if (!isDesktopLyricSupported) return null
   const update = () => {
     desktopLyricEnableRef.current?.setEnabled(!enabledLyric)
   }

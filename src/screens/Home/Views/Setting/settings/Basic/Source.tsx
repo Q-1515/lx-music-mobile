@@ -14,6 +14,7 @@ import Button from '../../components/Button'
 import UserApiEditModal, { type UserApiEditModalType } from './UserApiEditModal'
 import Text from '@/components/common/Text'
 import { useTheme } from '@/store/theme/hook'
+import { isUserApiSupported } from '@/utils/nativeModules/userApi'
 // import { importUserApi, removeUserApi } from '@/core/userApi'
 
 const apiSourceList = apiSourceInfo.map(api => ({
@@ -67,6 +68,7 @@ export default memo(() => {
   const apiStatus = useStatus()
   const apiSourceSetting = useSettingValue('common.apiSource')
   const userApiList = useMemo(() => {
+    if (!isUserApiSupported) return []
     const getApiStatus = () => {
       let status
       if (apiStatus.status) status = t('setting_basic_source_status_success')
@@ -105,10 +107,18 @@ export default memo(() => {
           userApiList.map(({ id, name, desc, statusLabel }) => <Item name={name} desc={desc} statusLabel={statusLabel} id={id} key={id} change={setApiSourceId} />)
         }
       </View>
-      <View style={styles.btn}>
-        <Button onPress={handleShow}>{t('setting_basic_source_user_api_btn')}</Button>
-      </View>
-      <UserApiEditModal ref={modalRef} />
+      {
+        isUserApiSupported
+          ? (
+              <>
+                <View style={styles.btn}>
+                  <Button onPress={handleShow}>{t('setting_basic_source_user_api_btn')}</Button>
+                </View>
+                <UserApiEditModal ref={modalRef} />
+              </>
+            )
+          : null
+      }
     </SubTitle>
   )
 })

@@ -1,4 +1,5 @@
 import { useState, useRef, forwardRef, useImperativeHandle } from 'react'
+import { Platform } from 'react-native'
 // import { StyleSheet, View, Text, StatusBar, ScrollView } from 'react-native'
 
 // import { useGetter, useDispatch } from '@/store'
@@ -52,15 +53,13 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
 
   useImperativeHandle(ref, () => ({
     show(options) {
-      if (!settingState.setting['common.useSystemFileSelector'] || options.dirOnly) {
-        // if (options.isPersist) {
+      if (Platform.OS == 'ios' && options.dirOnly) {
+        toast(t('platform_feature_not_supported'), 'long')
+        return
+      }
+      if (Platform.OS == 'android' && (!settingState.setting['common.useSystemFileSelector'] || options.dirOnly)) {
         void handleOpenExternalStorage(options)
-        // } else {
-        //   void selectManagedFolder().then((dir) => {
-        //     if (!dir || isUnmounted.current) return
-        //     listRef.current?.show(options.title, dir.path, options.dirOnly, options.filter)
-        //   })
-        // }
+        return
       } else {
         void selectFile({
           extTypes: options.filter,
@@ -77,6 +76,10 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
         }).catch(err => {
           if (isUnmounted.current) return
           log.warn('open document failed: ' + err.message)
+          if (Platform.OS == 'ios') {
+            toast(t('platform_feature_not_supported'), 'long')
+            return
+          }
           void confirmDialog({
             message: t('storage_file_no_select_file_failed_tip'),
             bgClose: false,

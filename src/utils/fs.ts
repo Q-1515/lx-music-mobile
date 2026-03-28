@@ -1,4 +1,5 @@
 import RNFS from 'react-native-fs'
+import { Platform } from 'react-native'
 import {
   Dirs,
   FileSystem,
@@ -13,6 +14,11 @@ export type {
   FileType,
 } from 'react-native-file-system'
 
+export const isSystemFileSelectorSupported = typeof AndroidScoped?.openDocument == 'function'
+export const isManagedFolderSupported = typeof AndroidScoped?.openDocumentTree == 'function'
+
+const unsupportedError = (feature: string) => new Error(`${feature} is not supported on ${Platform.OS}`)
+
 // export const externalDirectoryPath = RNFS.ExternalDirectoryPath
 
 export const extname = (name: string) => name.lastIndexOf('.') > 0 ? name.substring(name.lastIndexOf('.') + 1) : ''
@@ -23,12 +29,27 @@ export const privateStorageDirectoryPath = Dirs.DocumentDir
 
 export const getExternalStoragePaths = async(is_removable?: boolean) => _getExternalStoragePaths(is_removable)
 
-export const selectManagedFolder = async(isPersist: boolean = false) => AndroidScoped.openDocumentTree(isPersist)
-export const selectFile = async(options: OpenDocumentOptions) => AndroidScoped.openDocument(options)
-export const removeManagedFolder = async(path: string) => AndroidScoped.releasePersistableUriPermission(path)
-export const getManagedFolders = async() => AndroidScoped.getPersistedUriPermissions()
+export const selectManagedFolder = async(isPersist: boolean = false) => {
+  if (!isManagedFolderSupported) throw unsupportedError('Folder selection')
+  return AndroidScoped.openDocumentTree(isPersist)
+}
+export const selectFile = async(options: OpenDocumentOptions) => {
+  if (!isSystemFileSelectorSupported) throw unsupportedError('File selection')
+  return AndroidScoped.openDocument(options)
+}
+export const removeManagedFolder = async(path: string) => {
+  if (!isManagedFolderSupported) throw unsupportedError('Managed folder removal')
+  return AndroidScoped.releasePersistableUriPermission(path)
+}
+export const getManagedFolders = async() => {
+  if (!isManagedFolderSupported) return []
+  return AndroidScoped.getPersistedUriPermissions()
+}
 
-export const getPersistedUriList = async() => AndroidScoped.getPersistedUriPermissions()
+export const getPersistedUriList = async() => {
+  if (!isManagedFolderSupported) return []
+  return AndroidScoped.getPersistedUriPermissions()
+}
 
 
 export const readDir = async(path: string) => FileSystem.ls(path)

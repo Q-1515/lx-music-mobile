@@ -13,10 +13,12 @@ import TextPositionX from './TextPositionX'
 import TextPositionY from './TextPositionY'
 import { useI18n } from '@/lang'
 import Theme from './Theme'
+import { isDesktopLyricSupported } from '@/utils/nativeModules/lyricDesktop'
 // import { useTranslation } from '@/plugins/i18n'
 
 export default memo(() => {
   const t = useI18n()
+  if (!isDesktopLyricSupported) return null
 
   return (
     <Section title={t('setting_lyric_desktop')}>

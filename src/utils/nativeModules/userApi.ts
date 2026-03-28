@@ -1,10 +1,16 @@
 import { NativeEventEmitter, NativeModules } from 'react-native'
 
 const { UserApiModule } = NativeModules
+export const isUserApiSupported = !!UserApiModule
+
+const assertUserApiSupport = () => {
+  if (!UserApiModule) throw new Error('User API is not supported on this platform yet')
+}
 
 let loadScriptInfo: LX.UserApi.UserApiInfo | null = null
 export const loadScript = (info: LX.UserApi.UserApiInfo & { script: string }) => {
   loadScriptInfo = info
+  assertUserApiSupport()
   UserApiModule.loadScript({
     id: info.id,
     name: info.name,
@@ -31,6 +37,7 @@ export interface SendActions {
   response: SendResponseParams
 }
 export const sendAction = <T extends keyof SendActions>(action: T, data: SendActions[T]) => {
+  if (!UserApiModule) return false
   UserApiModule.sendAction(action, JSON.stringify(data))
 }
 
@@ -77,6 +84,7 @@ export interface Actions {
 export type ActionsEvent = { [K in keyof Actions]: { action: K, data: Actions[K] } }[keyof Actions]
 
 export const onScriptAction = (handler: (event: ActionsEvent) => void): () => void => {
+  if (!UserApiModule) return () => {}
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   const eventEmitter = new NativeEventEmitter(UserApiModule)
   const eventListener = eventEmitter.addListener('api-action', event => {
@@ -96,5 +104,6 @@ export const onScriptAction = (handler: (event: ActionsEvent) => void): () => vo
 }
 
 export const destroy = () => {
+  if (!UserApiModule) return
   UserApiModule.destroy()
 }

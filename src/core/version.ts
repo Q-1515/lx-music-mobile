@@ -1,5 +1,5 @@
 import { compareVer } from '@/utils'
-import { downloadNewVersion, getVersionInfo } from '@/utils/version'
+import { downloadNewVersion, getVersionInfo, isInternalUpdateSupported, openReleasePage } from '@/utils/version'
 import versionActions from '@/store/version/action'
 import versionState, { type InitState } from '@/store/version/state'
 import { getIgnoreVersion, getIgnoreVersionFailTipTime, saveIgnoreVersion, saveIgnoreVersionFailTipTime } from '@/utils/data'
@@ -69,6 +69,10 @@ export const checkUpdate = async() => {
 }
 
 export const downloadUpdate = () => {
+  if (!isInternalUpdateSupported) {
+    void openReleasePage(versionState.versionInfo.newVersion?.version)
+    return
+  }
   versionActions.setVersionInfo({ status: 'downloading' })
   versionActions.setProgress({ total: 0, current: 0 })
 

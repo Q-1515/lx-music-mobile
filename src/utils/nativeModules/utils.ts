@@ -1,35 +1,60 @@
-import { AppState, NativeEventEmitter, NativeModules } from 'react-native'
+import { AppState, Dimensions, NativeEventEmitter, NativeModules, Platform, Share } from 'react-native'
 
-const { UtilsModule } = NativeModules
+const { SettingsManager, UtilsModule } = NativeModules
 
-export const exitApp = UtilsModule.exitApp
+const unsupportedError = (feature: string) => new Error(`${feature} is not supported on ${Platform.OS}`)
+const createEmitter = () => UtilsModule ? new NativeEventEmitter(UtilsModule) : null
 
-export const getSupportedAbis = UtilsModule.getSupportedAbis
+export const exitApp = () => {
+  if (typeof UtilsModule?.exitApp == 'function') UtilsModule.exitApp()
+}
 
-export const installApk = (filePath: string, fileProviderAuthority: string) => UtilsModule.installApk(filePath, fileProviderAuthority)
+export const getSupportedAbis = async(): Promise<string[]> => {
+  if (typeof UtilsModule?.getSupportedAbis == 'function') return UtilsModule.getSupportedAbis()
+  return Platform.OS == 'ios' ? ['arm64'] : []
+}
+
+export const installApk = async(filePath: string, fileProviderAuthority: string) => {
+  if (typeof UtilsModule?.installApk == 'function') return UtilsModule.installApk(filePath, fileProviderAuthority)
+  throw unsupportedError('installApk')
+}
 
 
 export const screenkeepAwake = () => {
   if (global.lx.isScreenKeepAwake) return
   global.lx.isScreenKeepAwake = true
-  UtilsModule.screenkeepAwake()
+  UtilsModule?.screenkeepAwake?.()
 }
 export const screenUnkeepAwake = () => {
   // console.log('screenUnkeepAwake')
   if (!global.lx.isScreenKeepAwake) return
   global.lx.isScreenKeepAwake = false
-  UtilsModule.screenUnkeepAwake()
+  UtilsModule?.screenUnkeepAwake?.()
 }
 
-export const getWIFIIPV4Address = UtilsModule.getWIFIIPV4Address as () => Promise<string>
+export const getWIFIIPV4Address = async(): Promise<string> => {
+  if (typeof UtilsModule?.getWIFIIPV4Address == 'function') return UtilsModule.getWIFIIPV4Address()
+  return ''
+}
 
 export const getDeviceName = async(): Promise<string> => {
-  return UtilsModule.getDeviceName().then((deviceName: string) => deviceName || 'Unknown')
+  if (typeof UtilsModule?.getDeviceName == 'function') {
+    return UtilsModule.getDeviceName().then((deviceName: string) => deviceName || 'Unknown')
+  }
+  // @ts-expect-error
+  return Platform.constants?.Model || (Platform.OS == 'ios' ? 'iPhone' : 'Unknown')
 }
 
-export const isNotificationsEnabled = UtilsModule.isNotificationsEnabled as () => Promise<boolean>
+export const isNotificationsEnabled = async(): Promise<boolean> => {
+  if (typeof UtilsModule?.isNotificationsEnabled == 'function') return UtilsModule.isNotificationsEnabled()
+  return true
+}
 
 export const requestNotificationPermission = async() => new Promise<boolean>((resolve) => {
+  if (typeof UtilsModule?.openNotificationPermissionActivity != 'function') {
+    resolve(true)
+    return
+  }
   let subscription = AppState.addEventListener('change', (state) => {
     if (state != 'active') return
     subscription.remove()
@@ -45,16 +70,34 @@ export const requestNotificationPermission = async() => new Promise<boolean>((re
 })
 
 export const shareText = async(shareTitle: string, title: string, text: string): Promise<void> => {
-  UtilsModule.shareText(shareTitle, title, text)
+  if (typeof UtilsModule?.shareText == 'function') {
+    UtilsModule.shareText(shareTitle, title, text)
+    return
+  }
+  await Share.share({
+    title,
+    message: text,
+  }, {
+    subject: shareTitle,
+  })
 }
 
 export const getSystemLocales = async(): Promise<string> => {
-  return UtilsModule.getSystemLocales()
+  if (typeof UtilsModule?.getSystemLocales == 'function') return UtilsModule.getSystemLocales()
+
+  const locale = SettingsManager?.settings?.AppleLocale
+    || SettingsManager?.settings?.AppleLanguages?.[0]
+    || Intl.DateTimeFormat().resolvedOptions().locale
+    || ''
+  return typeof locale == 'string'
+    ? locale.replace(/-/g, '_').toLowerCase()
+    : ''
 }
 
 export const onScreenStateChange = (handler: (state: 'ON' | 'OFF') => void): () => void => {
+  const eventEmitter = createEmitter()
+  if (!eventEmitter) return () => {}
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-  const eventEmitter = new NativeEventEmitter(UtilsModule)
   const eventListener = eventEmitter.addListener('screen-state', event => {
     handler(event.state as 'ON' | 'OFF')
   })
@@ -65,10 +108,28 @@ export const onScreenStateChange = (handler: (state: 'ON' | 'OFF') => void): () 
 }
 
 export const getWindowSize = async(): Promise<{ width: number, height: number }> => {
-  return UtilsModule.getWindowSize()
+  if (typeof UtilsModule?.getWindowSize == 'function') return UtilsModule.getWindowSize()
+
+  const window = Dimensions.get('window')
+  return {
+    width: Math.round(window.width * window.scale),
+    height: Math.round(window.height * window.scale),
+  }
 }
 
 export const onWindowSizeChange = (handler: (size: { width: number, height: number }) => void): () => void => {
+  if (!UtilsModule) {
+    const subscription = Dimensions.addEventListener('change', ({ window }) => {
+      handler({
+        width: Math.round(window.width * window.scale),
+        height: Math.round(window.height * window.scale),
+      })
+    })
+    return () => {
+      subscription.remove()
+    }
+  }
+
   UtilsModule.listenWindowSizeChanged()
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   const eventEmitter = new NativeEventEmitter(UtilsModule)
@@ -82,10 +143,15 @@ export const onWindowSizeChange = (handler: (size: { width: number, height: numb
 }
 
 export const isIgnoringBatteryOptimization = async(): Promise<boolean> => {
-  return UtilsModule.isIgnoringBatteryOptimization()
+  if (typeof UtilsModule?.isIgnoringBatteryOptimization == 'function') return UtilsModule.isIgnoringBatteryOptimization()
+  return true
 }
 
 export const requestIgnoreBatteryOptimization = async() => new Promise<boolean>((resolve) => {
+  if (typeof UtilsModule?.requestIgnoreBatteryOptimization != 'function') {
+    resolve(true)
+    return
+  }
   let subscription = AppState.addEventListener('change', (state) => {
     if (state != 'active') return
     subscription.remove()

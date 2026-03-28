@@ -82,7 +82,5 @@ const styles = createStyle({
     alignItems: 'center',
 
     // backgroundColor: '#ccc',
-    shadowOpacity: 1,
-    textShadowRadius: 1,
   },
 })

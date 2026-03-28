@@ -74,8 +74,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
 
     // backgroundColor: '#ccc',
-    shadowOpacity: 1,
-    textShadowRadius: 1,
     // marginLeft: 10,
   },
 })

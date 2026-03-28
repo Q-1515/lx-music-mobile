@@ -8,6 +8,31 @@ const defaultHeaders = {
 // var proxyUrl = "http://" + user + ":" + password + "@" + host + ":" + port;
 // var proxiedRequest = request.defaults({'proxy': proxyUrl});
 
+const getHeaderValue = (headers, key) => {
+  if (!headers) return ''
+  const value = headers[key] ?? headers[key.toLowerCase()] ?? headers[key.toUpperCase()]
+  if (Array.isArray(value)) return String(value[0] ?? '')
+  return value == null ? '' : String(value)
+}
+
+const shouldParseJson = (headers, body) => {
+  const contentType = getHeaderValue(headers, 'content-type').toLowerCase()
+  if (contentType) {
+    if (
+      contentType.includes('application/json') ||
+      contentType.includes('text/json') ||
+      contentType.includes('application/javascript') ||
+      contentType.includes('text/javascript') ||
+      contentType.includes('application/x-javascript')
+    ) return true
+    if (contentType.startsWith('text/plain')) return true
+  }
+
+  if (typeof body != 'string') return false
+  const text = body.trim()
+  return text.startsWith('{') || text.startsWith('[')
+}
+
 const handleRequestData = async({
   method = 'get',
   headers = {},
@@ -102,9 +127,11 @@ export const fetchData = (url, { timeout = 13_000, ...options }) => {
             return resp
           })
         } else {
-          try {
-            resp.body = JSON.parse(resp.body)
-          } catch {}
+          if (shouldParseJson(resp.headers, resp.body)) {
+            try {
+              resp.body = JSON.parse(resp.body)
+            } catch {}
+          }
           return resp
         }
       }).catch(err => {

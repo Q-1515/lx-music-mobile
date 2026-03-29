@@ -49,16 +49,16 @@ export default {
           },
           module: 'playlist.PlayListCategoryServer',
         },
-      }))}`
+        }))}`
     }
     return `https://u.y.qq.com/cgi-bin/musicu.fcg?loginUin=0&hostUin=0&format=json&inCharset=utf-8&outCharset=utf-8&notice=0&platform=wk_v15.json&needNewCode=0&data=${encodeURIComponent(JSON.stringify({
-      comm: { cv: 1602, ct: 20 },
-      playlist: {
-        method: 'get_playlist_by_tag',
-        param: { id: 10000000, sin: this.limit_list * (page - 1), size: this.limit_list, order: sortId, cur_page: page },
-        module: 'playlist.PlayListPlazaServer',
-      },
-    }))}`
+          comm: { cv: 1602, ct: 20 },
+          playlist: {
+            method: 'get_playlist_by_tag',
+            param: { id: 10000000, sin: this.limit_list * (page - 1), size: this.limit_list, order: sortId, cur_page: page },
+            module: 'playlist.PlayListPlazaServer',
+          },
+      }))}`
   },
   getListDetailUrl(id) {
     return `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=${id}&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0`
@@ -291,46 +291,38 @@ export default {
     return `https://y.qq.com/n/ryqq/playlist/${id}`
   },
 
-  async search(text, page, limit = 20, retryNum = 0) {
+  search(text, page, limit = 20, retryNum = 0) {
     if (retryNum > 5) throw new Error('max retry')
-    try {
-      const httpTask = httpFetch(`http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=${page - 1}&num_per_page=${limit}&format=json&query=${encodeURIComponent(text)}&remoteplace=txt.yqq.playlist&inCharset=utf8&outCharset=utf-8`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
-          Referer: 'http://y.qq.com/portal/search.html',
-        },
+    return httpFetch(`http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=${page - 1}&num_per_page=${limit}&format=json&query=${encodeURIComponent(text)}&remoteplace=txt.yqq.playlist&inCharset=utf8&outCharset=utf-8`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
+        Referer: 'http://y.qq.com/portal/search.html',
+      },
+    })
+      .promise.then(({ body }) => {
+        if (body.code != 0) return this.search(text, page, limit, ++retryNum)
+        // console.log(body.data.list)
+        return {
+          list: body.data.list.map(item => {
+            return {
+              play_count: formatPlayCount(item.listennum),
+              id: String(item.dissid),
+              author: decodeName(item.creator.name),
+              name: decodeName(item.dissname),
+              time: dateFormat(item.createtime, 'Y-M-D'),
+              img: item.imgurl,
+              // grade: item.favorcnt / 10,
+              total: item.song_count,
+              desc: decodeName(decodeName(item.introduction)).replace(/<br>/g, '\n'),
+              source: 'tx',
+            }
+          }),
+          limit,
+          total: body.data.sum,
+          source: 'tx',
+        }
       })
-
-      const { body } = await httpTask.promise;
-      if (body.code != 0) {
-        return await this.search(text, page, limit, ++retryNum);
-      }
-
-      return {
-        list: body.data.list.map(item => {
-          return {
-            play_count: formatPlayCount(item.listennum),
-            id: String(item.dissid),
-            author: decodeName(item.creator.name),
-            name: decodeName(item.dissname),
-            time: dateFormat(item.createtime, 'Y-M-D'),
-            img: item.imgurl,
-            // grade: item.favorcnt / 10,
-            total: item.song_count,
-            desc: decodeName(decodeName(item.introduction)).replace(/<br>/g, '\n'),
-            source: 'tx',
-          };
-        }),
-        limit,
-        total: body.data.sum,
-        source: 'tx',
-      };
-    } catch (error) {
-      // 捕获网络错误、超时等，并触发重试
-      console.error(`[Retry ${retryNum}] 网络请求失败:`, err.message);
-      return await this.search(text, page, limit, ++retryNum);
-    }
-  }
+  },
 }
 
 // getList

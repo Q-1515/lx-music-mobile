@@ -4,6 +4,7 @@ import BackgroundTimer from 'react-native-background-timer'
 import { requestMsg } from './message'
 import { bHh } from './musicSdk/options'
 import { deflateRaw } from 'pako'
+import { log } from '@/utils/log'
 
 const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
@@ -182,6 +183,8 @@ const fetchData = (url, { timeout = 15000, ...options }) => {
         signal: controller.signal,
       }).then(resp => (options.binary ? resp.blob() : resp.text()).then(text => {
         // console.log(options, headers, text)
+        log.error('请求完成', options, text)
+        log.error('text result:', typeof text, text ? text.slice(0, 100) : text)
         return {
           headers: resp.headers.map,
           body: text,

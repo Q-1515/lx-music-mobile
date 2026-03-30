@@ -371,6 +371,7 @@ static UIViewController *LXTopViewController(void) {
   if (window == nil) window = UIApplication.sharedApplication.windows.firstObject;
 
   UIViewController *controller = window.rootViewController;
+  if (controller == nil) return nil;
   while (controller.presentedViewController != nil) controller = controller.presentedViewController;
   return controller;
 }
@@ -459,10 +460,10 @@ RCT_REMAP_METHOD(openDocument, openDocument:(NSDictionary *)options resolver:(RC
     self.pickerReject = reject;
     self.targetPath = [options[@"toPath"] isKindOfClass:[NSString class]] ? options[@"toPath"] : @"";
 
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeOpen];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data", @"public.item"] inMode:UIDocumentPickerModeOpen];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
-    picker.modalPresentationStyle = UIModalPresentationFormSheet;
+    picker.modalPresentationStyle = UIModalPresentationFullScreen;
     self.pickerController = picker;
     [controller presentViewController:picker animated:YES completion:nil];
   });

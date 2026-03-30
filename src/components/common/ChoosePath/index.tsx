@@ -8,7 +8,7 @@ import List, { type ListType } from './List'
 import ConfirmAlert, { type ConfirmAlertType } from '@/components/common/ConfirmAlert'
 import { toast, TEMP_FILE_PATH, checkStoragePermissions, requestStoragePermission, confirmDialog } from '@/utils/tools'
 import { useI18n } from '@/lang'
-import { selectFile, selectManagedFolder, unlink } from '@/utils/fs'
+import { selectFile, unlink } from '@/utils/fs'
 import { useUnmounted } from '@/utils/hooks'
 import settingState from '@/store/setting/state'
 import { log } from '@/utils/log'
@@ -40,17 +40,6 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
   const readOptions = useRef<ReadOptions>(initReadOptions as ReadOptions)
   const isUnmounted = useUnmounted()
 
-  const isPickerCancelled = (err: any) => {
-    const code = typeof err?.code == 'string' ? err.code.toLowerCase() : ''
-    const message = typeof err?.message == 'string' ? err.message.toLowerCase() : ''
-    return code == 'picker_cancelled'
-      || code == 'picker_canceled'
-      || message.includes('document selection was cancelled')
-      || message.includes('document selection was canceled')
-      || message.includes('cancelled')
-      || message.includes('canceled')
-  }
-
   const handleOpenExternalStorage = async(options: ReadOptions) => {
     return checkStoragePermissions().then(isGranted => {
       readOptions.current = options
@@ -64,19 +53,9 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
 
   useImperativeHandle(ref, () => ({
     show(options) {
-      if (Platform.OS == 'ios') {
-        if (options.dirOnly) {
-          void selectManagedFolder(!!options.isPersist).then((dir) => {
-            if (!dir || isUnmounted.current) return
-            onConfirm(dir.path)
-          }).catch(err => {
-            if (isUnmounted.current) return
-            if (isPickerCancelled(err)) return
-            log.warn('open managed folder failed: ' + err.message)
-            toast(t('platform_feature_not_supported'), 'long')
-          })
-          return
-        }
+      if (Platform.OS == 'ios' && options.dirOnly) {
+        toast(t('platform_feature_not_supported'), 'long')
+        return
       }
       if (Platform.OS == 'android' && (!settingState.setting['common.useSystemFileSelector'] || options.dirOnly)) {
         void handleOpenExternalStorage(options)
@@ -98,7 +77,6 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
           onConfirm(filePath)
         }).catch(err => {
           if (isUnmounted.current) return
-          if (Platform.OS == 'ios' && isPickerCancelled(err)) return
           log.warn('open document failed: ' + err.message)
           if (Platform.OS == 'ios') {
             toast(t('platform_feature_not_supported'), 'long')

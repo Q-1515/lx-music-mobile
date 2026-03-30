@@ -142,6 +142,10 @@ export class AppEvent extends Event {
     this.emit('lyricOffsetUpdate')
   }
 
+  seekLyric(time: number) {
+    this.emit('seekLyric', time)
+  }
+
   // 我的列表内歌曲改变事件
   myListMusicUpdate(ids: string[]) {
     if (!ids.length) return

@@ -74,7 +74,11 @@ export default () => {
     if (!playerState.musicInfo.id) return
     // console.log('setProgress', time, maxTime)
     setNowPlayTime(time)
-    void setCurrentTime(time)
+    void setCurrentTime(time).then(() => {
+      void getPosition().then(position => {
+        global.app_event.seekLyric(position || time)
+      })
+    })
 
     if (maxTime != null) setMaxplayTime(maxTime)
 

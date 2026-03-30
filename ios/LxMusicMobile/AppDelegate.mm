@@ -388,7 +388,15 @@ static UIViewController *LXTopViewController(void) {
       if (window != nil) break;
     }
   }
-  if (window == nil) window = UIApplication.sharedApplication.delegate.window;
+  if (window == nil) {
+    for (UIWindow *appWindow in UIApplication.sharedApplication.windows) {
+      if (appWindow.isKeyWindow) {
+        window = appWindow;
+        break;
+      }
+    }
+  }
+  if (window == nil) window = UIApplication.sharedApplication.windows.firstObject;
 
   controller = window.rootViewController;
   while (controller.presentedViewController != nil) controller = controller.presentedViewController;

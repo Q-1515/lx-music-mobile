@@ -1,5 +1,7 @@
-import TrackPlayer from 'react-native-track-player'
-import { updateOptions, setVolume, setPlaybackRate, migratePlayerCache } from './utils'
+import TrackPlayer, { State } from 'react-native-track-player'
+import { updateOptions, setVolume, setPlaybackRate, migratePlayerCache, destroy as destroyPlayer, getPosition } from './utils'
+import { getCurrentTrack, restoreTrack } from './playList'
+import settingState from '@/store/setting/state'
 
 // const listenEvent = () => {
 //   TrackPlayer.addEventListener('playback-error', err => {
@@ -46,10 +48,42 @@ const initial = async({ volume, playRate, cacheSize, isHandleAudioFocus, isEnabl
 
 const isInitialized = () => global.lx.playerStatus.isInitialized
 
+const getPlayerConfig = () => ({
+  volume: settingState.setting['player.volume'],
+  playRate: settingState.setting['player.playbackRate'],
+  cacheSize: settingState.setting['player.cacheSize'] ? parseInt(settingState.setting['player.cacheSize']) : 0,
+  isHandleAudioFocus: settingState.setting['player.isHandleAudioFocus'],
+  isEnableAudioOffload: settingState.setting['player.isEnableAudioOffload'],
+})
+
+let reconfigurePromise = Promise.resolve()
+const reloadConfig = async() => {
+  const run = async() => {
+    if (global.lx.playerStatus.isIniting || !global.lx.playerStatus.isInitialized) return
+
+    const [track, position, currentState] = await Promise.all([
+      getCurrentTrack(),
+      getPosition(),
+      TrackPlayer.getState(),
+    ])
+    const shouldRestoreTrack = !!track && !/\/\/default$/.test(track.id)
+
+    await destroyPlayer()
+    await initial(getPlayerConfig())
+
+    if (!shouldRestoreTrack || !track) return
+    await restoreTrack(track, position, currentState == State.Playing)
+  }
+
+  reconfigurePromise = reconfigurePromise.then(run, run)
+  return reconfigurePromise
+}
+
 
 export {
   initial,
   isInitialized,
+  reloadConfig,
   setVolume,
   setPlaybackRate,
 }

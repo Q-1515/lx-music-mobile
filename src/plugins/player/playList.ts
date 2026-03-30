@@ -123,6 +123,24 @@ export const getCurrentTrack = async() => {
   return list[currentTrackIndex]
 }
 
+export const clearTracks = () => {
+  list.length = 0
+  prevArtwork = undefined
+  state.isPlaying = false
+  state.prevDuration = -1
+}
+
+export const restoreTrack = async(track: LX.Player.Track, position: number, isPlaying: boolean) => {
+  const restoredTrack = { ...track }
+  await TrackPlayer.add([restoredTrack]).then(() => list.push(restoredTrack))
+  const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
+  const trackIndex = queue.findIndex(t => t.id == restoredTrack.id)
+  if (trackIndex > -1) await TrackPlayer.skip(trackIndex)
+  if (position > 0) await TrackPlayer.seekTo(position)
+  if (isPlaying) await TrackPlayer.play()
+  else await TrackPlayer.pause()
+}
+
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
   if (!force && isPlay == state.isPlaying) {
     const duration = await TrackPlayer.getDuration()

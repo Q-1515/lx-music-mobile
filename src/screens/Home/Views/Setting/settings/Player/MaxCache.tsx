@@ -6,6 +6,7 @@ import { createStyle, toast } from '@/utils/tools'
 import { useSettingValue } from '@/store/setting/hook'
 import { useI18n } from '@/lang'
 import { updateSetting } from '@/core/common'
+import { reloadConfig as reloadPlayerConfig } from '@/plugins/player'
 
 const MAX_SIZE = 1024 * 1024 * 1024
 export default memo(() => {
@@ -29,6 +30,7 @@ export default memo(() => {
     callback(size)
     if (cacheSize == size) return
     setCacheSize(size)
+    void reloadPlayerConfig()
     toast(t('setting_play_cache_size_save_tip'))
   }
 

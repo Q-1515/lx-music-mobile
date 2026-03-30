@@ -4,6 +4,7 @@ import { playMusic as handlePlayMusic } from './playList'
 import { existsFile, moveFile, privateStorageDirectoryPath, temporaryDirectoryPath } from '@/utils/fs'
 import { toast } from '@/utils/tools'
 import { NativeModules, Platform } from 'react-native'
+import { clearTracks } from './playList'
 // import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
 
 
@@ -216,6 +217,7 @@ export const migratePlayerCache = async() => {
 export const destroy = async() => {
   if (global.lx.playerStatus.isIniting || !global.lx.playerStatus.isInitialized) return
   await TrackPlayer.destroy()
+  clearTracks()
   global.lx.playerStatus.isInitialized = false
 }
 

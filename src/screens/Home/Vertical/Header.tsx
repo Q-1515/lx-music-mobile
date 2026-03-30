@@ -19,6 +19,10 @@ const headerComponents: Partial<Record<CommonState['navActiveId'], React.ReactNo
   nav_search: <SearchTypeSelector />,
 }
 
+const openMenu = () => {
+  global.app_event.changeMenuVisible(true)
+}
+
 
 // const LeftTitle = () => {
 //   const id = useNavActiveId()
@@ -31,10 +35,6 @@ const LeftHeader = () => {
   const id = useNavActiveId()
   const t = useI18n()
   const statusBarHeight = useStatusbarHeight()
-
-  const openMenu = () => {
-    global.app_event.changeMenuVisible(true)
-  }
 
   return (
     <View style={{

@@ -780,6 +780,33 @@ RCT_REMAP_METHOD(writeLyric, writeLyric:(NSString *)filePath lyric:(NSString *)l
 
 @end
 
+@interface UtilsModule : NSObject<RCTBridgeModule>
+@end
+
+@implementation UtilsModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return YES;
+}
+
+RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {
+  (void)eventName;
+}
+
+RCT_EXPORT_METHOD(removeListeners:(double)count) {
+  (void)count;
+}
+
+RCT_EXPORT_METHOD(exitApp) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    exit(0);
+  });
+}
+
+@end
+
 @interface CryptoModule : NSObject<RCTBridgeModule>
 @end
 

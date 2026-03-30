@@ -3,7 +3,9 @@ import { AppState, Dimensions, NativeEventEmitter, NativeModules, Platform, Shar
 const { SettingsManager, UtilsModule } = NativeModules
 
 const unsupportedError = (feature: string) => new Error(`${feature} is not supported on ${Platform.OS}`)
-const createEmitter = () => UtilsModule ? new NativeEventEmitter(UtilsModule) : null
+const createEmitter = () => UtilsModule && typeof UtilsModule.addListener == 'function' && typeof UtilsModule.removeListeners == 'function'
+  ? new NativeEventEmitter(UtilsModule)
+  : null
 
 export const exitApp = () => {
   if (typeof UtilsModule?.exitApp == 'function') UtilsModule.exitApp()
@@ -128,7 +130,7 @@ export const getWindowSize = async(): Promise<{ width: number, height: number }>
 }
 
 export const onWindowSizeChange = (handler: (size: { width: number, height: number }) => void): () => void => {
-  if (!UtilsModule) {
+  if (typeof UtilsModule?.listenWindowSizeChanged != 'function') {
     const subscription = Dimensions.addEventListener('change', ({ window }) => {
       handler({
         width: Math.round(window.width * window.scale),

@@ -8,7 +8,7 @@ import BackgroundTimer from 'react-native-background-timer'
 import playerState from '@/store/player/state'
 import settingState from '@/store/setting/state'
 import { onScreenStateChange } from '@/utils/nativeModules/utils'
-import { AppState } from 'react-native'
+import { AppState, Platform } from 'react-native'
 
 const delaySavePlayInfo = throttleBackgroundTimer(() => {
   void savePlayInfo({
@@ -23,6 +23,7 @@ export default () => {
   // const updateMusicInfo = useCommit('list', 'updateMusicInfo')
 
   let updateTimeout: number | null = null
+  let seekSyncId = 0
 
   let isScreenOn = true
 
@@ -75,13 +76,26 @@ export default () => {
     // console.log('setProgress', time, maxTime)
     setNowPlayTime(time)
     void setCurrentTime(time).then(() => {
-      setTimeout(() => {
-        void getPosition().then(position => {
-          const targetPosition = position > 0 ? position : time
-          setNowPlayTime(targetPosition)
-          global.app_event.seekLyric(targetPosition)
-        })
-      }, 180)
+      if (Platform.OS != 'ios') {
+        global.app_event.seekLyric(time)
+        return
+      }
+
+      const currentSeekSyncId = ++seekSyncId
+      let targetPosition = time
+      for (const [index, delay] of [140, 320, 560].entries()) {
+        setTimeout(() => {
+          if (currentSeekSyncId != seekSyncId || !playerState.musicInfo.id) return
+          void getPosition().then(position => {
+            if (currentSeekSyncId != seekSyncId || !playerState.musicInfo.id) return
+            if (position > 0) {
+              targetPosition = position
+              setNowPlayTime(position)
+            }
+            if (index == 2) global.app_event.seekLyric(targetPosition)
+          })
+        }, delay)
+      }
     })
 
     if (maxTime != null) setMaxplayTime(maxTime)

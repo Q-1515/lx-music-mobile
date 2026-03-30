@@ -1,17 +1,19 @@
-import { NativeEventEmitter, NativeModules } from 'react-native'
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native'
+import { destroyFallbackUserApi, hasUserApiFallback, loadFallbackScript, onFallbackScriptAction, sendFallbackAction } from './userApiFallback'
 
 const { UserApiModule } = NativeModules
-export const isUserApiSupported = !!UserApiModule
+const useFallbackUserApi = !UserApiModule && Platform.OS == 'ios' && hasUserApiFallback
+export const isUserApiSupported = !!UserApiModule || useFallbackUserApi
 
 const assertUserApiSupport = () => {
-  if (!UserApiModule) throw new Error('User API is not supported on this platform yet')
+  if (!UserApiModule && !useFallbackUserApi) throw new Error('User API is not supported on this platform yet')
 }
 
 let loadScriptInfo: LX.UserApi.UserApiInfo | null = null
 export const loadScript = (info: LX.UserApi.UserApiInfo & { script: string }) => {
   loadScriptInfo = info
   assertUserApiSupport()
-  UserApiModule.loadScript({
+  const payload = {
     id: info.id,
     name: info.name,
     description: info.description,
@@ -19,7 +21,12 @@ export const loadScript = (info: LX.UserApi.UserApiInfo & { script: string }) =>
     author: info.author ?? '',
     homepage: info.homepage ?? '',
     script: info.script,
-  })
+  }
+  if (UserApiModule) {
+    UserApiModule.loadScript(payload)
+    return
+  }
+  loadFallbackScript(payload)
 }
 
 export interface SendResponseParams {
@@ -37,8 +44,9 @@ export interface SendActions {
   response: SendResponseParams
 }
 export const sendAction = <T extends keyof SendActions>(action: T, data: SendActions[T]) => {
-  if (!UserApiModule) return false
-  UserApiModule.sendAction(action, JSON.stringify(data))
+  if (UserApiModule) return UserApiModule.sendAction(action, JSON.stringify(data))
+  if (useFallbackUserApi) return sendFallbackAction(action, data)
+  return false
 }
 
 // export const clearAppCache = CacheModule.clearAppCache as () => Promise<void>
@@ -84,11 +92,22 @@ export interface Actions {
 export type ActionsEvent = { [K in keyof Actions]: { action: K, data: Actions[K] } }[keyof Actions]
 
 export const onScriptAction = (handler: (event: ActionsEvent) => void): () => void => {
+  if (useFallbackUserApi) {
+    return onFallbackScriptAction((event) => {
+      if (event.action == 'init') {
+        if (event.data?.info) event.data.info = { ...loadScriptInfo, ...event.data.info }
+        else event.data = { ...event.data, info: { ...loadScriptInfo } }
+      } else if ((event as { action: string }).action == 'showUpdateAlert') {
+        if (!loadScriptInfo?.allowShowUpdateAlert) return
+      }
+      handler(event as ActionsEvent)
+    })
+  }
   if (!UserApiModule) return () => {}
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   const eventEmitter = new NativeEventEmitter(UserApiModule)
   const eventListener = eventEmitter.addListener('api-action', event => {
-    if (event.data) event.data = JSON.parse(event.data as string)
+    if (typeof event.data == 'string') event.data = JSON.parse(event.data as string)
     if (event.action == 'init') {
       if (event.data.info) event.data.info = { ...loadScriptInfo, ...event.data.info }
       else event.data.info = { ...loadScriptInfo }
@@ -104,6 +123,9 @@ export const onScriptAction = (handler: (event: ActionsEvent) => void): () => vo
 }
 
 export const destroy = () => {
-  if (!UserApiModule) return
-  UserApiModule.destroy()
+  if (UserApiModule) {
+    UserApiModule.destroy()
+    return
+  }
+  if (useFallbackUserApi) destroyFallbackUserApi()
 }

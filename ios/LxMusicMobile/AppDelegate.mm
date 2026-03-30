@@ -480,6 +480,68 @@ static NSString *LXPrepareImportedFilePath(NSString *targetPath, NSURL *sourceUR
   return basePath;
 }
 
+static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
+  if (![extTypes isKindOfClass:[NSArray class]]) return @[ @"public.data", @"public.item" ];
+
+  NSMutableOrderedSet<NSString *> *types = [NSMutableOrderedSet orderedSet];
+  for (id item in (NSArray *)extTypes) {
+    if (![item isKindOfClass:[NSString class]]) continue;
+    NSString *ext = ((NSString *)item).lowercaseString;
+    if (!ext.length) continue;
+
+    if ([ext isEqualToString:@"js"]) {
+      [types addObject:@"com.netscape.javascript-source"];
+      continue;
+    }
+    if ([ext isEqualToString:@"json"]) {
+      [types addObject:@"public.json"];
+      continue;
+    }
+    if ([ext isEqualToString:@"lxmc"]) {
+      [types addObject:@"cn.toside.music.mobile.songlist"];
+      continue;
+    }
+    if ([ext isEqualToString:@"bin"]) {
+      [types addObject:@"cn.toside.music.mobile.backup"];
+      continue;
+    }
+    if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) {
+      [types addObject:@"public.jpeg"];
+      continue;
+    }
+    if ([ext isEqualToString:@"png"]) {
+      [types addObject:@"public.png"];
+      continue;
+    }
+    if ([ext isEqualToString:@"gif"]) {
+      [types addObject:@"com.compuserve.gif"];
+      continue;
+    }
+    if ([ext isEqualToString:@"txt"] || [ext isEqualToString:@"lrc"]) {
+      [types addObject:@"public.plain-text"];
+      continue;
+    }
+    if ([ext isEqualToString:@"mp3"]) {
+      [types addObject:@"public.mp3"];
+      continue;
+    }
+    if ([ext isEqualToString:@"m4a"] || [ext isEqualToString:@"aac"]) {
+      [types addObject:@"public.audio"];
+      continue;
+    }
+    if ([ext isEqualToString:@"wav"]) {
+      [types addObject:@"com.microsoft.waveform-audio"];
+      continue;
+    }
+    if ([ext isEqualToString:@"flac"] || [ext isEqualToString:@"ogg"]) {
+      [types addObject:@"public.audio"];
+      continue;
+    }
+  }
+
+  return types.count ? types.array : @[ @"public.data", @"public.item" ];
+}
+
 @interface FilePickerModule : NSObject<RCTBridgeModule, UIDocumentPickerDelegate>
 @property (nonatomic, copy) RCTPromiseResolveBlock pickerResolve;
 @property (nonatomic, copy) RCTPromiseRejectBlock pickerReject;
@@ -526,7 +588,8 @@ RCT_REMAP_METHOD(openDocument, openDocument:(NSDictionary *)options resolver:(RC
     self.pickerReject = reject;
     self.targetPath = [options[@"toPath"] isKindOfClass:[NSString class]] ? options[@"toPath"] : @"";
 
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data", @"public.item"] inMode:UIDocumentPickerModeImport];
+    NSArray<NSString *> *documentTypes = LXDocumentTypesForExtensions(options[@"extTypes"]);
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:documentTypes inMode:UIDocumentPickerModeImport];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
     picker.modalPresentationStyle = UIModalPresentationFullScreen;

@@ -25,7 +25,7 @@ import {
 import settingState from '@/store/setting/state'
 import playerState from '@/store/player/state'
 import { tranditionalize } from '@/utils/simplify-chinese-main'
-import { getPosition } from '@/plugins/player'
+import { getPosition } from '@/plugins/player/utils'
 export {
   onLyricLinePlay,
 } from '@/utils/nativeModules/lyricDesktop'

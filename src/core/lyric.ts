@@ -15,7 +15,7 @@ import {
   toggleDesktopLyricTranslation,
   toggleDesktopLyricRoma,
 } from '@/core/desktopLyric'
-import { getPosition } from '@/plugins/player'
+import { getPosition } from '@/plugins/player/utils'
 import playerState from '@/store/player/state'
 // import settingState from '@/store/setting/state'
 

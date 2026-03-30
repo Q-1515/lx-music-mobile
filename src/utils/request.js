@@ -186,7 +186,7 @@ const fetchData = (url, { timeout = 15000, ...options }) => {
         log.error('请求完成', options, text)
         log.error('text result:', typeof text, text ? text.slice(0, 100) : text)
         return {
-          // headers: resp.headers.map,
+          headers: resp.headers.map,
           body: text,
           statusCode: resp.status,
           statusMessage: resp.statusText,

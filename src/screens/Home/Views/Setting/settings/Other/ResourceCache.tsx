@@ -22,9 +22,14 @@ export default memo(() => {
   // const clearCache = useDispatch('list', 'clearCache')
 
   const handleGetAppCacheSize = () => {
-    void Promise.all([getAppCacheSize(), getCacheSize()]).then(([size, size2]) => {
+    void Promise.all([
+      getAppCacheSize().catch(() => 0),
+      getCacheSize().catch(() => 0),
+    ]).then(([size, size2]) => {
       const count = size + size2
       setCacheSize(sizeFormate(count))
+    }).catch(() => {
+      setCacheSize(sizeFormate(0))
     })
   }
 

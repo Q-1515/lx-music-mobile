@@ -22,6 +22,8 @@ const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
   }) => Promise<void>
   getPosition?: () => Promise<number>
   getDuration?: () => Promise<number>
+  getCacheSize?: () => Promise<number>
+  clearCache?: () => Promise<void>
 }
 
 const emptyIdRxp = /\/\/default$/
@@ -210,8 +212,20 @@ export const updateNowPlayingTitles = async(duration: number, title: string, art
 export const resetPlay = async() => Promise.all([setPause(), setCurrentTime(0)])
 
 export const isCached = async(url: string) => TrackPlayer.isCached(url)
-export const getCacheSize = async() => TrackPlayer.getCacheSize()
-export const clearCache = async() => TrackPlayer.clearCache()
+export const getCacheSize = async() => {
+  if (Platform.OS == 'ios') {
+    if (typeof NativeTrackPlayerModule?.getCacheSize != 'function') return 0
+    return NativeTrackPlayerModule.getCacheSize()
+  }
+  return TrackPlayer.getCacheSize()
+}
+export const clearCache = async() => {
+  if (Platform.OS == 'ios') {
+    if (typeof NativeTrackPlayerModule?.clearCache != 'function') return
+    return NativeTrackPlayerModule.clearCache()
+  }
+  return TrackPlayer.clearCache()
+}
 export const migratePlayerCache = async() => {
   const newCachePath = privateStorageDirectoryPath + '/TrackPlayer'
   if (await existsFile(newCachePath)) return

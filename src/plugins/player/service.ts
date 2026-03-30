@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import TrackPlayer, { State as TPState, Event as TPEvent } from 'react-native-track-player'
+import { Platform } from 'react-native'
 // import { store } from '@/store'
 // import { action as playerAction, STATUS } from '@/store/modules/player'
 import { isTempId, isEmpty } from './utils'
@@ -117,7 +118,7 @@ const registerPlaybackService = async() => {
     if (global.lx.isPlayedStop) return handleExitApp('Timeout Exit')
 
     // console.log('global.lx.playerTrackId====>', global.lx.playerTrackId)
-    if (isEmpty()) {
+    if (Platform.OS != 'ios' && isEmpty()) {
       // console.log('====TEMP PAUSE====')
       await TrackPlayer.pause()
       global.app_event.playerPause()
@@ -173,6 +174,16 @@ const registerPlaybackService = async() => {
   //   //   })
   //   // }
   //   // store.dispatch(playerAction.playNext())
+  })
+  const playbackQueueEndedEvent = (TPEvent as any).PlaybackQueueEnded ?? 'playback-queue-ended'
+  TrackPlayer.addEventListener(playbackQueueEndedEvent, async() => {
+    if (Platform.OS != 'ios') return
+    if (global.lx.gettingUrlId || isTempId()) return
+    global.lx.playerTrackId = ''
+    global.app_event.playerPause()
+    global.app_event.pause()
+    global.app_event.playerEnded()
+    global.app_event.playerEmptied()
   })
   // TrackPlayer.addEventListener('playback-queue-ended', async info => {
   //   // console.log('playback-queue-ended', info)

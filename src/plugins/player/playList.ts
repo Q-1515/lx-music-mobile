@@ -1,6 +1,7 @@
 import TrackPlayer, { State } from 'react-native-track-player'
 import BackgroundTimer from 'react-native-background-timer'
 import { defaultUrl } from '@/config'
+import { Platform } from 'react-native'
 // import { action as playerAction } from '@/store/modules/player'
 import settingState from '@/store/setting/state'
 
@@ -51,17 +52,19 @@ const buildTracks = (musicInfo: LX.Player.PlayMusic, url?: LX.Player.Track['url'
       duration,
     })
   }
-  track.push({
-    id: `${mInfo.id}__//${Math.random()}__//default`,
-    url: defaultUrl,
-    title: mInfo.name || 'Unknow',
-    artist: mInfo.singer || 'Unknow',
-    album,
-    artwork,
-    musicId: mInfo.id,
-    // original: { ...musicInfo },
-    duration: 0,
-  })
+  if (!url || Platform.OS != 'ios') {
+    track.push({
+      id: `${mInfo.id}__//${Math.random()}__//default`,
+      url: defaultUrl,
+      title: mInfo.name || 'Unknow',
+      artist: mInfo.singer || 'Unknow',
+      album,
+      artwork,
+      musicId: mInfo.id,
+      // original: { ...musicInfo },
+      duration: 0,
+    })
+  }
   return track
   // console.log('buildTrack', musicInfo.name, url)
 }
@@ -168,8 +171,9 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
     }
   }
 
-  if (queue.length > 2) {
-    void TrackPlayer.remove(Array(queue.length - 2).fill(null).map((_, i) => i)).then(() => list.splice(0, list.length - 2))
+  if (queue.length > tracks.length) {
+    const removeCount = queue.length - tracks.length
+    void TrackPlayer.remove(Array(removeCount).fill(null).map((_, i) => i)).then(() => list.splice(0, list.length - removeCount))
   }
 }
 let playPromise = Promise.resolve()

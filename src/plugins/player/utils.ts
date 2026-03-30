@@ -3,11 +3,23 @@ import BackgroundTimer from 'react-native-background-timer'
 import { playMusic as handlePlayMusic } from './playList'
 import { existsFile, moveFile, privateStorageDirectoryPath, temporaryDirectoryPath } from '@/utils/fs'
 import { toast } from '@/utils/tools'
-import { Platform } from 'react-native'
+import { NativeModules, Platform } from 'react-native'
 // import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
 
 
 export { useBufferProgress } from './hook'
+
+const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
+  updateNowPlayingMetadata?: (metadata: {
+    title?: string
+    artist?: string
+    album?: string
+    artwork?: string
+    duration?: number
+    elapsedTime?: number
+    isLiveStream?: boolean
+  }) => Promise<void>
+}
 
 const emptyIdRxp = /\/\/default$/
 const tempIdRxp = /\/\/default$|\/\/default\/\/restorePlay$/
@@ -171,13 +183,13 @@ export const setVolume = async(num: number) => TrackPlayer.setVolume(num)
 export const setPlaybackRate = async(num: number) => TrackPlayer.setRate(num)
 export const updateNowPlayingTitles = async(duration: number, title: string, artist: string, album: string) => {
   console.log('set playing titles', duration, title, artist, album)
-  if (Platform.OS == 'ios') {
-    return TrackPlayer.updateNowPlayingMetadata({
+  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.updateNowPlayingMetadata == 'function') {
+    return NativeTrackPlayerModule.updateNowPlayingMetadata({
       title,
       artist,
       album: album || undefined,
       duration: duration > 0 ? duration / 1000 : 0,
-    }, true)
+    })
   }
   return TrackPlayer.updateNowPlayingTitles(duration, title, artist, album)
 }

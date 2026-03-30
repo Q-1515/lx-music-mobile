@@ -1,7 +1,7 @@
 import TrackPlayer, { State } from 'react-native-track-player'
 import BackgroundTimer from 'react-native-background-timer'
 import { defaultUrl } from '@/config'
-import { Platform } from 'react-native'
+import { NativeModules, Platform } from 'react-native'
 // import { action as playerAction } from '@/store/modules/player'
 import settingState from '@/store/setting/state'
 
@@ -14,6 +14,18 @@ const httpRxp = /^(https?:\/\/.+|\/.+)/
 export const state = {
   isPlaying: false,
   prevDuration: -1,
+}
+
+const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
+  updateNowPlayingMetadata?: (metadata: {
+    title?: string
+    artist?: string
+    album?: string
+    artwork?: string
+    duration?: number
+    elapsedTime?: number
+    isLiveStream?: boolean
+  }) => Promise<void>
 }
 
 const formatMusicInfo = (musicInfo: LX.Player.PlayMusic) => {
@@ -216,13 +228,18 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
     name = lyric
     singer = `${mInfo.name}${mInfo.singer ? ` - ${mInfo.singer}` : ''}`
   }
-  await TrackPlayer.updateNowPlayingMetadata({
+  const metadata = {
     title: name,
     artist: singer,
     album: mInfo.album ?? undefined,
     artwork,
     duration: state.prevDuration || 0,
-  }, state.isPlaying)
+  }
+  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.updateNowPlayingMetadata == 'function') {
+    await NativeTrackPlayerModule.updateNowPlayingMetadata(metadata)
+  } else {
+    await TrackPlayer.updateNowPlayingMetadata(metadata, state.isPlaying)
+  }
 }
 
 

@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { ActionSheetIOS, Platform, TouchableOpacity } from 'react-native'
 
 import DorpDownMenu, { type DorpDownMenuProps as _DorpDownMenuProps } from '@/components/common/DorpDownMenu'
 import Text from '@/components/common/Text'
@@ -27,7 +28,7 @@ export default ({ btnStyle, onImportAction }: BtnProps) => {
 
   type DorpDownMenuProps = _DorpDownMenuProps<typeof importTypes>
 
-  const handleAction: DorpDownMenuProps['onPress'] = ({ action }) => {
+  const handleImportAction = (action: 'local' | 'online') => {
     if (state.list.length > 20) {
       void tipDialog({
         message: t('user_api_max_tip'),
@@ -37,6 +38,38 @@ export default ({ btnStyle, onImportAction }: BtnProps) => {
     }
 
     onImportAction?.(action)
+  }
+
+  const handleAction: DorpDownMenuProps['onPress'] = ({ action }) => {
+    handleImportAction(action)
+  }
+
+  const handleShowActionSheet = () => {
+    ActionSheetIOS.showActionSheetWithOptions({
+      options: [
+        t('user_api_btn_import_local'),
+        t('user_api_btn_import_online'),
+        t('cancel'),
+      ],
+      cancelButtonIndex: 2,
+    }, index => {
+      switch (index) {
+        case 0:
+          handleImportAction('local')
+          break
+        case 1:
+          handleImportAction('online')
+          break
+      }
+    })
+  }
+
+  if (Platform.OS == 'ios') {
+    return (
+      <TouchableOpacity style={btnStyle} onPress={handleShowActionSheet}>
+        <Text size={14} color={theme['c-button-font']}>{t('user_api_btn_import')}</Text>
+      </TouchableOpacity>
+    )
   }
 
   return (

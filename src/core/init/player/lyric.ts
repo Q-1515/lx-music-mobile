@@ -1,4 +1,4 @@
-import { init as initLyricPlayer, toggleTranslation, toggleRoma, play, pause, stop, setLyric, setPlaybackRate } from '@/core/lyric'
+import { init as initLyricPlayer, toggleTranslation, toggleRoma, play, pause, stop, setLyric, setPlaybackRate, seek } from '@/core/lyric'
 import { updateSetting } from '@/core/common'
 import { onDesktopLyricPositionChange, showDesktopLyric, onLyricLinePlay, showRemoteLyric } from '@/core/desktopLyric'
 import playerState from '@/store/player/state'
@@ -52,6 +52,7 @@ export default async(setting: LX.AppSetting) => {
   global.app_event.on('pause', pause)
   global.app_event.on('stop', stop)
   global.app_event.on('error', pause)
+  global.app_event.on('setProgress', seek)
   global.app_event.on('musicToggled', stop)
   global.app_event.on('lyricUpdated', setLyric)
 }

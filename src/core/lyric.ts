@@ -102,6 +102,15 @@ export const play = () => {
   })
 }
 
+export const seek = (time: number) => {
+  handlePlay(time * 1000)
+  if (!playerState.isPlay) {
+    setTimeout(() => {
+      pause()
+    })
+  }
+}
+
 
 export const setLyric = async() => {
   if (!playerState.musicInfo.id) return

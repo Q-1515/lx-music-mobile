@@ -1,7 +1,9 @@
 import ChoosePath, { type ChoosePathType } from '@/components/common/ChoosePath'
 import { LXM_FILE_EXT_RXP } from '@/config/constant'
+import { Platform } from 'react-native'
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { handleExport, handleImport, handleImportMediaFile } from './listAction'
+import { toast } from '@/utils/tools'
 
 export interface SelectInfo {
   listInfo: LX.List.MyListInfo
@@ -62,6 +64,10 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
         listInfo,
         index,
       }
+      if (Platform.OS == 'ios') {
+        handleExport(listInfo)
+        return
+      }
       if (visible) {
         choosePathRef.current?.show({
           title: global.i18n.t('list_export_part_desc'),
@@ -84,6 +90,10 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
         action: 'selectFile',
         listInfo,
         index,
+      }
+      if (Platform.OS == 'ios') {
+        toast(global.i18n.t('platform_feature_not_supported'), 'long')
+        return
       }
       if (visible) {
         choosePathRef.current?.show({

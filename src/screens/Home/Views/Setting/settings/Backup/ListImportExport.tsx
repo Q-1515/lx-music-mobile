@@ -1,5 +1,6 @@
 import ChoosePath, { type ChoosePathType } from '@/components/common/ChoosePath'
 import { LXM_FILE_EXT_RXP } from '@/config/constant'
+import { Platform } from 'react-native'
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { handleExportList, handleImportList } from './actions'
 
@@ -53,6 +54,10 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
     },
     export() {
       selectInfoRef.current.action = 'export'
+      if (Platform.OS == 'ios') {
+        handleExportList()
+        return
+      }
       if (visible) {
         choosePathRef.current?.show({
           title: global.i18n.t('list_export_part_desc'),

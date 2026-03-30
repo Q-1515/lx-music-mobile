@@ -4,6 +4,9 @@ import { filterMusicList, fixNewMusicInfoQuality, toNewMusicInfo } from '@/utils
 import { log } from '@/utils/log'
 import { confirmDialog, handleReadFile, handleSaveFile, showImportTip, toast } from '@/utils/tools'
 import listState from '@/store/list/state'
+import { temporaryDirectoryPath, unlink } from '@/utils/fs'
+import { Platform } from 'react-native'
+import { shareFile } from '@/utils/nativeModules/utils'
 
 
 const getAllLists = async() => {
@@ -197,9 +200,20 @@ const exportAllList = async(path: string) => {
     log.error(error.stack)
   }
 }
-export const handleExportList = (path: string) => {
+export const handleExportList = (path?: string) => {
   toast(global.i18n.t('setting_backup_part_export_list_tip_zip'))
-  void exportAllList(path).then(() => {
+  const exportPath = Platform.OS == 'ios' ? temporaryDirectoryPath : path
+  if (!exportPath) {
+    toast(global.i18n.t('setting_backup_part_export_list_tip_failed'), 'long')
+    return
+  }
+  const filePath = exportPath + '/lx_list.lxmc'
+  void exportAllList(exportPath).then(async() => {
+    if (Platform.OS == 'ios') {
+      await shareFile(global.i18n.t('share_title_music'), filePath).finally(() => {
+        void unlink(filePath)
+      })
+    }
     toast(global.i18n.t('setting_backup_part_export_list_tip_success'))
   }).catch((err: any) => {
     log.error(err.message)

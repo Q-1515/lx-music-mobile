@@ -345,6 +345,171 @@ static NSString *LXSHA1(NSString *value) {
   return hash;
 }
 
+static UIViewController *LXTopViewController(void) {
+  UIWindow *window = nil;
+  if (@available(iOS 13.0, *)) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+      if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+      UIWindowScene *windowScene = (UIWindowScene *)scene;
+      for (UIWindow *sceneWindow in windowScene.windows) {
+        if (sceneWindow.isKeyWindow) {
+          window = sceneWindow;
+          break;
+        }
+      }
+      if (window != nil) break;
+    }
+  }
+  if (window == nil) {
+    for (UIWindow *appWindow in UIApplication.sharedApplication.windows) {
+      if (appWindow.isKeyWindow) {
+        window = appWindow;
+        break;
+      }
+    }
+  }
+  if (window == nil) window = UIApplication.sharedApplication.windows.firstObject;
+
+  UIViewController *controller = window.rootViewController;
+  while (controller.presentedViewController != nil) controller = controller.presentedViewController;
+  return controller;
+}
+
+static NSDictionary *LXFileInfoFromPath(NSString *path) {
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  BOOL isDirectory = NO;
+  [fileManager fileExistsAtPath:path isDirectory:&isDirectory];
+  NSDictionary *attributes = [fileManager attributesOfItemAtPath:path error:nil] ?: @{};
+  NSDate *modifiedDate = attributes[NSFileModificationDate] ?: [NSDate date];
+  NSString *name = path.lastPathComponent ?: @"";
+  return @{
+    @"name": name,
+    @"path": path ?: @"",
+    @"size": attributes[NSFileSize] ?: @0,
+    @"isDirectory": @(isDirectory),
+    @"isFile": @(!isDirectory),
+    @"lastModified": @((long long)(modifiedDate.timeIntervalSince1970 * 1000)),
+    @"mimeType": [NSNull null],
+    @"canRead": @([fileManager isReadableFileAtPath:path ?: @""]),
+  };
+}
+
+static NSString *LXPrepareImportedFilePath(NSString *targetPath, NSURL *sourceURL, NSError **error) {
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSString *basePath = targetPath.length ? targetPath : NSTemporaryDirectory();
+  BOOL isDirectory = NO;
+  BOOL exists = [fileManager fileExistsAtPath:basePath isDirectory:&isDirectory];
+
+  if (!exists || isDirectory || basePath.pathExtension.length == 0) {
+    if (![fileManager fileExistsAtPath:basePath]) {
+      if (![fileManager createDirectoryAtPath:basePath withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+    }
+    NSString *fileName = sourceURL.lastPathComponent.length ? sourceURL.lastPathComponent : [NSString stringWithFormat:@"%@.tmp", NSUUID.UUID.UUIDString];
+    return [basePath stringByAppendingPathComponent:fileName];
+  }
+
+  NSString *parentPath = [basePath stringByDeletingLastPathComponent];
+  if (parentPath.length && ![fileManager fileExistsAtPath:parentPath]) {
+    if (![fileManager createDirectoryAtPath:parentPath withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+  }
+  return basePath;
+}
+
+@interface FilePickerModule : NSObject<RCTBridgeModule, UIDocumentPickerDelegate>
+@property (nonatomic, copy) RCTPromiseResolveBlock pickerResolve;
+@property (nonatomic, copy) RCTPromiseRejectBlock pickerReject;
+@property (nonatomic, copy) NSString *targetPath;
+@property (nonatomic, strong) UIDocumentPickerViewController *pickerController;
+@end
+
+@implementation FilePickerModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return YES;
+}
+
+- (void)resetPickerState {
+  self.pickerResolve = nil;
+  self.pickerReject = nil;
+  self.targetPath = nil;
+  self.pickerController = nil;
+}
+
+- (void)rejectPickerWithCode:(NSString *)code message:(NSString *)message error:(NSError *)error {
+  if (self.pickerReject != nil) self.pickerReject(code, message, error);
+  [self resetPickerState];
+}
+
+RCT_REMAP_METHOD(openDocument, openDocument:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.pickerController != nil) {
+      reject(@"picker_busy", @"Another picker is already active", LXError(@"picker_busy", @"Another picker is already active"));
+      return;
+    }
+
+    UIViewController *controller = LXTopViewController();
+    if (controller == nil) {
+      reject(@"picker_present", @"Unable to find a view controller to present file picker", LXError(@"picker_present", @"Unable to find a view controller to present file picker"));
+      return;
+    }
+
+    self.pickerResolve = resolve;
+    self.pickerReject = reject;
+    self.targetPath = [options[@"toPath"] isKindOfClass:[NSString class]] ? options[@"toPath"] : @"";
+
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.item"] inMode:UIDocumentPickerModeOpen];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
+    picker.modalPresentationStyle = UIModalPresentationFormSheet;
+    self.pickerController = picker;
+    [controller presentViewController:picker animated:YES completion:nil];
+  });
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+  [controller dismissViewControllerAnimated:YES completion:nil];
+  [self rejectPickerWithCode:@"picker_cancelled" message:@"Document selection was cancelled" error:LXError(@"picker_cancelled", @"Document selection was cancelled")];
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+  NSURL *pickedURL = urls.firstObject;
+  [controller dismissViewControllerAnimated:YES completion:nil];
+
+  if (pickedURL == nil) {
+    [self rejectPickerWithCode:@"picker_empty" message:@"No document was selected" error:LXError(@"picker_empty", @"No document was selected")];
+    return;
+  }
+
+  NSError *error = nil;
+  BOOL startedAccessing = [pickedURL startAccessingSecurityScopedResource];
+  NSString *targetPath = LXPrepareImportedFilePath(self.targetPath ?: @"", pickedURL, &error);
+  if (targetPath == nil) {
+    if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
+    [self rejectPickerWithCode:@"copy_target_failed" message:error.localizedDescription ?: @"Failed to prepare imported file path" error:error];
+    return;
+  }
+
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  [fileManager removeItemAtPath:targetPath error:nil];
+  if (![fileManager copyItemAtURL:pickedURL toURL:[NSURL fileURLWithPath:targetPath] error:&error]) {
+    if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
+    [self rejectPickerWithCode:@"copy_failed" message:error.localizedDescription ?: @"Failed to import selected file" error:error];
+    return;
+  }
+  if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
+
+  NSDictionary *fileInfo = LXFileInfoFromPath(targetPath);
+  NSMutableDictionary *result = fileInfo != nil ? [fileInfo mutableCopy] : [NSMutableDictionary dictionary];
+  if (result == nil) result = [NSMutableDictionary dictionary];
+  result[@"data"] = targetPath;
+  if (self.pickerResolve != nil) self.pickerResolve(result);
+  [self resetPickerState];
+}
+
+@end
+
 static NSString *LXMediaMetadataSidecarPath(NSString *filePath) {
   return [filePath stringByAppendingString:@".lxmeta.json"];
 }

@@ -1,4 +1,5 @@
 import RNFS from 'react-native-fs'
+import { NativeModules } from 'react-native'
 import pako from 'pako'
 
 export interface FileType {
@@ -17,11 +18,16 @@ export interface OpenDocumentOptions {
   toPath?: string
 }
 
+interface OpenDocumentResult extends FileType {
+  data?: string
+}
+
 export type Encoding = 'utf8' | 'ascii' | 'base64'
 export type HashAlgorithm = 'md5' | 'sha1' | 'sha224' | 'sha256' | 'sha384' | 'sha512'
 
 const unsupportedError = (feature: string) => new Error(`${feature} is not supported on ios`)
-export const isSystemFileSelectorSupported = false
+const { FilePickerModule } = NativeModules
+export const isSystemFileSelectorSupported = typeof FilePickerModule?.openDocument == 'function'
 export const isManagedFolderSupported = false
 
 const audioMimeTypeMap: Record<string, string> = {
@@ -73,8 +79,9 @@ export const getExternalStoragePaths = async(_is_removable?: boolean) => [RNFS.D
 export const selectManagedFolder = async(_isPersist: boolean = false): Promise<FileType> => {
   throw unsupportedError('Folder selection')
 }
-export const selectFile = async(_options: OpenDocumentOptions): Promise<FileType & { data?: string }> => {
-  throw unsupportedError('File selection')
+export const selectFile = async(options: OpenDocumentOptions): Promise<OpenDocumentResult> => {
+  if (!isSystemFileSelectorSupported) throw unsupportedError('File selection')
+  return FilePickerModule.openDocument(options) as Promise<OpenDocumentResult>
 }
 export const removeManagedFolder = async(_path: string) => {
   throw unsupportedError('Managed folder removal')

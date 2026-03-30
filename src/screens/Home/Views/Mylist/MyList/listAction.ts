@@ -7,7 +7,9 @@ import { handleImportListPart } from '@/screens/Home/Views/Setting/settings/Back
 import { readMetadata, scanAudioFiles, type MusicMetadataFull } from '@/utils/localMediaMetadata'
 import settingState from '@/store/setting/state'
 import BackgroundTimer from 'react-native-background-timer'
-import { type FileType } from '@/utils/fs'
+import { temporaryDirectoryPath, unlink, type FileType } from '@/utils/fs'
+import { Platform } from 'react-native'
+import { shareFile } from '@/utils/nativeModules/utils'
 
 export const handleRemove = (listInfo: LX.List.UserListInfo) => {
   void confirmDialog({
@@ -68,9 +70,20 @@ const exportList = async(listInfo: LX.List.MyListInfo, path: string) => {
     log.error(error.stack)
   }
 }
-export const handleExport = (listInfo: LX.List.MyListInfo, path: string) => {
+export const handleExport = (listInfo: LX.List.MyListInfo, path?: string) => {
   toast(global.i18n.t('setting_backup_part_export_list_tip_zip'))
-  exportList(listInfo, path).then(() => {
+  const exportPath = Platform.OS == 'ios' ? temporaryDirectoryPath : path
+  if (!exportPath) {
+    toast(global.i18n.t('setting_backup_part_export_list_tip_failed'), 'long')
+    return
+  }
+  const filePath = `${exportPath}/lx_list_part_${filterFileName(listInfo.name)}.lxmc`
+  exportList(listInfo, exportPath).then(async() => {
+    if (Platform.OS == 'ios') {
+      await shareFile(global.i18n.t('share_title_music'), filePath).finally(() => {
+        void unlink(filePath)
+      })
+    }
     toast(global.i18n.t('setting_backup_part_export_list_tip_success'))
   }).catch((err: any) => {
     log.error(err.message)

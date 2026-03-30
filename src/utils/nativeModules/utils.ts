@@ -82,6 +82,16 @@ export const shareText = async(shareTitle: string, title: string, text: string):
   })
 }
 
+export const shareFile = async(shareTitle: string, filePath: string): Promise<void> => {
+  const url = filePath.startsWith('file://') ? filePath : `file://${filePath}`
+  await Share.share({
+    title: shareTitle,
+    url,
+  }, {
+    subject: shareTitle,
+  })
+}
+
 export const getSystemLocales = async(): Promise<string> => {
   if (typeof UtilsModule?.getSystemLocales == 'function') return UtilsModule.getSystemLocales()
 

@@ -77,7 +77,9 @@ export default () => {
     void setCurrentTime(time).then(() => {
       setTimeout(() => {
         void getPosition().then(position => {
-          global.app_event.seekLyric(position > 0 ? position : time)
+          const targetPosition = position > 0 ? position : time
+          setNowPlayTime(targetPosition)
+          global.app_event.seekLyric(targetPosition)
         })
       }, 180)
     })

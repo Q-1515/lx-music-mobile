@@ -346,26 +346,17 @@ static NSString *LXSHA1(NSString *value) {
   return hash;
 }
 
-static NSString *const LXManagedFolderBookmarksKey = @"LXManagedFolderBookmarks";
+static NSString *const LXManagedFolderPathsKey = @"LXManagedFolderPaths";
 
-static NSMutableDictionary<NSString *, NSURL *> *LXActiveSecurityScopedURLs(void) {
-  static NSMutableDictionary<NSString *, NSURL *> *activeURLs = nil;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    activeURLs = [NSMutableDictionary dictionary];
-  });
-  return activeURLs;
+static NSMutableOrderedSet<NSString *> *LXLoadManagedPaths(void) {
+  NSArray *storedPaths = [[NSUserDefaults standardUserDefaults] arrayForKey:LXManagedFolderPathsKey];
+  if (![storedPaths isKindOfClass:[NSArray class]]) return [NSMutableOrderedSet orderedSet];
+  return [NSMutableOrderedSet orderedSetWithArray:storedPaths];
 }
 
-static NSMutableDictionary<NSString *, NSString *> *LXLoadManagedBookmarks(void) {
-  NSDictionary *storedBookmarks = [[NSUserDefaults standardUserDefaults] dictionaryForKey:LXManagedFolderBookmarksKey];
-  if (![storedBookmarks isKindOfClass:[NSDictionary class]]) return [NSMutableDictionary dictionary];
-  return [storedBookmarks mutableCopy];
-}
-
-static void LXSaveManagedBookmarks(NSDictionary<NSString *, NSString *> *bookmarks) {
+static void LXSaveManagedPaths(NSOrderedSet<NSString *> *paths) {
   NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-  [defaults setObject:bookmarks forKey:LXManagedFolderBookmarksKey];
+  [defaults setObject:paths.array forKey:LXManagedFolderPathsKey];
   [defaults synchronize];
 }
 
@@ -539,48 +530,14 @@ RCT_REMAP_METHOD(openDocumentTree, openDocumentTree:(BOOL)isPersist resolver:(RC
 }
 
 RCT_REMAP_METHOD(releasePersistableUriPermission, releasePersistableUriPermission:(NSString *)path resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
-  NSMutableDictionary<NSString *, NSString *> *bookmarks = LXLoadManagedBookmarks();
-  [bookmarks removeObjectForKey:path];
-  LXSaveManagedBookmarks(bookmarks);
-
-  NSURL *activeURL = LXActiveSecurityScopedURLs()[path];
-  if (activeURL != nil) {
-    [activeURL stopAccessingSecurityScopedResource];
-    [LXActiveSecurityScopedURLs() removeObjectForKey:path];
-  }
+  NSMutableOrderedSet<NSString *> *paths = LXLoadManagedPaths();
+  [paths removeObject:path];
+  LXSaveManagedPaths(paths);
   resolve(@(YES));
 }
 
 RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
-  NSMutableDictionary<NSString *, NSString *> *bookmarks = LXLoadManagedBookmarks();
-  NSMutableArray<NSString *> *paths = [NSMutableArray array];
-  NSMutableDictionary<NSString *, NSString *> *normalizedBookmarks = [NSMutableDictionary dictionary];
-
-  for (NSString *storedPath in bookmarks.allKeys) {
-    NSData *bookmarkData = LXBase64Decode(bookmarks[storedPath]);
-    if (!bookmarkData.length) continue;
-
-    BOOL stale = NO;
-    NSError *error = nil;
-    NSURL *url = [NSURL URLByResolvingBookmarkData:bookmarkData options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:&error];
-    if (url == nil) continue;
-
-    NSString *resolvedPath = LXPathKeyForURL(url);
-    BOOL started = [url startAccessingSecurityScopedResource];
-    if (started) LXActiveSecurityScopedURLs()[resolvedPath] = url;
-
-    NSString *bookmarkBase64 = bookmarks[storedPath];
-    if (stale) {
-      NSError *bookmarkError = nil;
-      NSData *refreshedBookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&bookmarkError];
-      if (refreshedBookmark.length) bookmarkBase64 = LXBase64Encode(refreshedBookmark);
-    }
-    normalizedBookmarks[resolvedPath] = bookmarkBase64;
-    [paths addObject:resolvedPath];
-  }
-
-  LXSaveManagedBookmarks(normalizedBookmarks);
-  resolve(paths);
+  resolve(LXLoadManagedPaths().array ?: @[]);
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
@@ -599,23 +556,14 @@ RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResol
     return;
   }
 
-  BOOL startedAccessing = [pickedURL startAccessingSecurityScopedResource];
   NSError *error = nil;
 
   if (self.directoryOnly) {
     NSString *pathKey = LXPathKeyForURL(pickedURL);
-    if (startedAccessing) LXActiveSecurityScopedURLs()[pathKey] = pickedURL;
-
     if (self.persistSelection) {
-      NSData *bookmarkData = [pickedURL bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
-      if (bookmarkData == nil) {
-        if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
-        [self rejectPickerWithCode:@"bookmark_failed" message:error.localizedDescription ?: @"Failed to store folder permission" error:error];
-        return;
-      }
-      NSMutableDictionary<NSString *, NSString *> *bookmarks = LXLoadManagedBookmarks();
-      bookmarks[pathKey] = LXBase64Encode(bookmarkData);
-      LXSaveManagedBookmarks(bookmarks);
+      NSMutableOrderedSet<NSString *> *paths = LXLoadManagedPaths();
+      [paths addObject:pathKey];
+      LXSaveManagedPaths(paths);
     }
 
     NSMutableDictionary *result = [[LXFileInfoFromURL(pickedURL) mutableCopy] ?: [NSMutableDictionary dictionary]];
@@ -626,7 +574,6 @@ RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResol
 
   NSURL *targetURL = LXPrepareImportedFileTargetURL(self.targetPath ?: @"", pickedURL, &error);
   if (targetURL == nil) {
-    if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
     [self rejectPickerWithCode:@"copy_target_failed" message:error.localizedDescription ?: @"Failed to prepare imported file path" error:error];
     return;
   }
@@ -634,11 +581,9 @@ RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResol
   NSFileManager *fileManager = [NSFileManager defaultManager];
   [fileManager removeItemAtURL:targetURL error:nil];
   if (![fileManager copyItemAtURL:pickedURL toURL:targetURL error:&error]) {
-    if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
     [self rejectPickerWithCode:@"copy_failed" message:error.localizedDescription ?: @"Failed to import selected file" error:error];
     return;
   }
-  if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
 
   NSMutableDictionary *result = [[LXFileInfoFromURL(targetURL) mutableCopy] ?: [NSMutableDictionary dictionary]];
   result[@"data"] = targetURL.path ?: @"";

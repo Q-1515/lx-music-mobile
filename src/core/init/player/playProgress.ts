@@ -1,6 +1,6 @@
 import { updateListMusics } from '@/core/list'
 import { setMaxplayTime, setNowPlayTime } from '@/core/player/progress'
-import { setCurrentTime, getDuration, getPosition } from '@/plugins/player'
+import { setCurrentTime, getDuration } from '@/plugins/player'
 import { formatPlayTime2 } from '@/utils/common'
 import { savePlayInfo } from '@/utils/data'
 import { throttleBackgroundTimer } from '@/utils/tools'
@@ -75,9 +75,7 @@ export default () => {
     // console.log('setProgress', time, maxTime)
     setNowPlayTime(time)
     void setCurrentTime(time).then(() => {
-      void getPosition().then(position => {
-        global.app_event.seekLyric(position || time)
-      })
+      global.app_event.seekLyric(time)
     })
 
     if (maxTime != null) setMaxplayTime(maxTime)

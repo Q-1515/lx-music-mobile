@@ -118,8 +118,10 @@ const Menu = ({
 
   const menuPress = (menu: Menus[number]) => {
     // if (menu.disabled) return
-    onPress(menu)
     onHide()
+    requestAnimationFrame(() => {
+      onPress(menu)
+    })
   }
 
   // console.log('render menu')

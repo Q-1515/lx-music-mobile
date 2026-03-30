@@ -484,6 +484,7 @@ static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
   if (![extTypes isKindOfClass:[NSArray class]]) return @[ @"public.data", @"public.item" ];
 
   NSMutableOrderedSet<NSString *> *types = [NSMutableOrderedSet orderedSet];
+  BOOL needsGenericDataType = NO;
   for (id item in (NSArray *)extTypes) {
     if (![item isKindOfClass:[NSString class]]) continue;
     NSString *ext = ((NSString *)item).lowercaseString;
@@ -491,6 +492,7 @@ static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
 
     if ([ext isEqualToString:@"js"]) {
       [types addObject:@"com.netscape.javascript-source"];
+      [types addObject:@"public.text"];
       continue;
     }
     if ([ext isEqualToString:@"json"]) {
@@ -498,11 +500,11 @@ static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
       continue;
     }
     if ([ext isEqualToString:@"lxmc"]) {
-      [types addObject:@"cn.toside.music.mobile.songlist"];
+      needsGenericDataType = YES;
       continue;
     }
     if ([ext isEqualToString:@"bin"]) {
-      [types addObject:@"cn.toside.music.mobile.backup"];
+      needsGenericDataType = YES;
       continue;
     }
     if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) {
@@ -537,6 +539,13 @@ static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
       [types addObject:@"public.audio"];
       continue;
     }
+
+    needsGenericDataType = YES;
+  }
+
+  if (needsGenericDataType) {
+    [types addObject:@"public.data"];
+    [types addObject:@"public.item"];
   }
 
   return types.count ? types.array : @[ @"public.data", @"public.item" ];

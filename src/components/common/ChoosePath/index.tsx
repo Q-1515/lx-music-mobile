@@ -8,7 +8,7 @@ import List, { type ListType } from './List'
 import ConfirmAlert, { type ConfirmAlertType } from '@/components/common/ConfirmAlert'
 import { toast, TEMP_FILE_PATH, checkStoragePermissions, requestStoragePermission, confirmDialog } from '@/utils/tools'
 import { useI18n } from '@/lang'
-import { selectFile, unlink } from '@/utils/fs'
+import { selectFile, selectManagedFolder, unlink } from '@/utils/fs'
 import { useUnmounted } from '@/utils/hooks'
 import settingState from '@/store/setting/state'
 import { log } from '@/utils/log'
@@ -53,9 +53,18 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
 
   useImperativeHandle(ref, () => ({
     show(options) {
-      if (Platform.OS == 'ios' && options.dirOnly) {
-        toast(t('platform_feature_not_supported'), 'long')
-        return
+      if (Platform.OS == 'ios') {
+        if (options.dirOnly) {
+          void selectManagedFolder(!!options.isPersist).then((dir) => {
+            if (!dir || isUnmounted.current) return
+            onConfirm(dir.path)
+          }).catch(err => {
+            if (isUnmounted.current) return
+            log.warn('open managed folder failed: ' + err.message)
+            toast(t('platform_feature_not_supported'), 'long')
+          })
+          return
+        }
       }
       if (Platform.OS == 'android' && (!settingState.setting['common.useSystemFileSelector'] || options.dirOnly)) {
         void handleOpenExternalStorage(options)
@@ -67,12 +76,14 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
         }).then((file) => {
           // console.log(file)
           if (!file || isUnmounted.current) return
-          if (options.filter && !options.filter.some(ext => file.data.toLowerCase().endsWith('.' + ext))) {
+          const filePath = file.data ?? file.path
+          if (!filePath) return
+          if (options.filter && !options.filter.some(ext => filePath.toLowerCase().endsWith('.' + ext))) {
             toast(t('storage_file_no_match'), 'long')
-            void unlink(file.data)
+            void unlink(filePath)
             return
           }
-          onConfirm(file.data)
+          onConfirm(filePath)
         }).catch(err => {
           if (isUnmounted.current) return
           log.warn('open document failed: ' + err.message)

@@ -3,8 +3,10 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <React/RCTBridgeModule.h>
 #import <React/RCTBundleURLProvider.h>
+#import <React/RCTUtils.h>
 #import <ReactNativeNavigation/ReactNativeNavigation.h>
 #import <Security/Security.h>
+#import <MobileCoreServices/MobileCoreServices.h>
 
 static NSData *LXBase64Decode(NSString *value) {
   if (value == nil) return [NSData data];
@@ -342,6 +344,309 @@ static NSString *LXSHA1(NSString *value) {
   }
   return hash;
 }
+
+static NSString *const LXManagedFolderBookmarksKey = @"LXManagedFolderBookmarks";
+
+static NSMutableDictionary<NSString *, NSURL *> *LXActiveSecurityScopedURLs(void) {
+  static NSMutableDictionary<NSString *, NSURL *> *activeURLs = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    activeURLs = [NSMutableDictionary dictionary];
+  });
+  return activeURLs;
+}
+
+static NSMutableDictionary<NSString *, NSString *> *LXLoadManagedBookmarks(void) {
+  NSDictionary *storedBookmarks = [[NSUserDefaults standardUserDefaults] dictionaryForKey:LXManagedFolderBookmarksKey];
+  if (![storedBookmarks isKindOfClass:[NSDictionary class]]) return [NSMutableDictionary dictionary];
+  return [storedBookmarks mutableCopy];
+}
+
+static void LXSaveManagedBookmarks(NSDictionary<NSString *, NSString *> *bookmarks) {
+  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+  [defaults setObject:bookmarks forKey:LXManagedFolderBookmarksKey];
+  [defaults synchronize];
+}
+
+static UIViewController *LXTopViewController(void) {
+  UIViewController *controller = RCTPresentedViewController();
+  if (controller != nil) return controller;
+
+  UIWindow *window = nil;
+  if (@available(iOS 13.0, *)) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+      if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+      UIWindowScene *windowScene = (UIWindowScene *)scene;
+      for (UIWindow *sceneWindow in windowScene.windows) {
+        if (sceneWindow.isKeyWindow) {
+          window = sceneWindow;
+          break;
+        }
+      }
+      if (window != nil) break;
+    }
+  }
+  if (window == nil) window = UIApplication.sharedApplication.delegate.window;
+
+  controller = window.rootViewController;
+  while (controller.presentedViewController != nil) controller = controller.presentedViewController;
+  return controller;
+}
+
+static NSString *LXPathKeyForURL(NSURL *url) {
+  if (url.path.length) return url.path;
+  if (url.absoluteString.length) return url.absoluteString;
+  return NSUUID.UUID.UUIDString;
+}
+
+static NSDictionary *LXFileInfoFromURL(NSURL *url) {
+  NSNumber *isDirectory = nil;
+  NSNumber *fileSize = nil;
+  NSDate *contentModificationDate = nil;
+  [url getResourceValue:&isDirectory forKey:NSURLIsDirectoryKey error:nil];
+  [url getResourceValue:&fileSize forKey:NSURLFileSizeKey error:nil];
+  [url getResourceValue:&contentModificationDate forKey:NSURLContentModificationDateKey error:nil];
+
+  BOOL directory = isDirectory.boolValue;
+  return @{
+    @"name": url.lastPathComponent ?: @"",
+    @"path": url.path ?: @"",
+    @"size": fileSize ?: @0,
+    @"isDirectory": @(directory),
+    @"isFile": @(!directory),
+    @"lastModified": @((long long)((contentModificationDate ?: [NSDate date]).timeIntervalSince1970 * 1000)),
+    @"mimeType": [NSNull null],
+    @"canRead": @([[NSFileManager defaultManager] isReadableFileAtPath:url.path ?: @""]),
+  };
+}
+
+static NSArray<NSString *> *LXDocumentTypesFromExtensions(NSArray<NSString *> *extTypes, BOOL directoryOnly) {
+  if (directoryOnly) return @[ @"public.folder" ];
+
+  NSMutableArray<NSString *> *types = [NSMutableArray array];
+  for (id ext in extTypes) {
+    if (![ext isKindOfClass:[NSString class]]) continue;
+    NSString *normalizedExt = [(NSString *)ext lowercaseString];
+    if ([normalizedExt hasPrefix:@"."]) normalizedExt = [normalizedExt substringFromIndex:1];
+    if (!normalizedExt.length) continue;
+    CFStringRef uti = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, (__bridge CFStringRef)normalizedExt, NULL);
+    if (uti != NULL) [types addObject:(__bridge_transfer NSString *)uti];
+  }
+  if (!types.count) [types addObject:@"public.item"];
+  return types;
+}
+
+static NSURL *LXPrepareImportedFileTargetURL(NSString *targetPath, NSURL *sourceURL, NSError **error) {
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSString *basePath = targetPath.length ? targetPath : NSTemporaryDirectory();
+  BOOL isDirectory = NO;
+  BOOL exists = [fileManager fileExistsAtPath:basePath isDirectory:&isDirectory];
+
+  if (!exists) {
+    if (basePath.pathExtension.length == 0) {
+      if (![fileManager createDirectoryAtPath:basePath withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+      isDirectory = YES;
+    } else {
+      NSString *parentPath = [basePath stringByDeletingLastPathComponent];
+      if (parentPath.length && ![fileManager fileExistsAtPath:parentPath]) {
+        if (![fileManager createDirectoryAtPath:parentPath withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+      }
+      return [NSURL fileURLWithPath:basePath];
+    }
+  }
+
+  if (!isDirectory) return [NSURL fileURLWithPath:basePath];
+  NSString *fileName = sourceURL.lastPathComponent.length ? sourceURL.lastPathComponent : [NSString stringWithFormat:@"%@.tmp", NSUUID.UUID.UUIDString];
+  return [NSURL fileURLWithPath:[basePath stringByAppendingPathComponent:fileName]];
+}
+
+@interface FilePickerModule : NSObject<RCTBridgeModule, UIDocumentPickerDelegate>
+@property (nonatomic, copy) RCTPromiseResolveBlock pickerResolve;
+@property (nonatomic, copy) RCTPromiseRejectBlock pickerReject;
+@property (nonatomic, copy) NSString *targetPath;
+@property (nonatomic, assign) BOOL directoryOnly;
+@property (nonatomic, assign) BOOL persistSelection;
+@property (nonatomic, strong) UIDocumentPickerViewController *pickerController;
+@end
+
+@implementation FilePickerModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return YES;
+}
+
+- (void)resetPickerState {
+  self.pickerResolve = nil;
+  self.pickerReject = nil;
+  self.targetPath = nil;
+  self.directoryOnly = NO;
+  self.persistSelection = NO;
+  self.pickerController = nil;
+}
+
+- (void)rejectPickerWithCode:(NSString *)code message:(NSString *)message error:(NSError *)error {
+  if (self.pickerReject != nil) self.pickerReject(code, message, error);
+  [self resetPickerState];
+}
+
+- (void)presentPickerWithTypes:(NSArray<NSString *> *)types {
+  UIViewController *controller = LXTopViewController();
+  if (controller == nil) {
+    NSError *viewError = LXError(@"picker_present", @"Unable to find a view controller to present file picker");
+    [self rejectPickerWithCode:@"picker_present" message:@"Unable to find a view controller to present file picker" error:viewError];
+    return;
+  }
+
+  UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:types inMode:UIDocumentPickerModeOpen];
+  picker.delegate = self;
+  picker.allowsMultipleSelection = NO;
+  picker.modalPresentationStyle = UIModalPresentationFormSheet;
+  self.pickerController = picker;
+  [controller presentViewController:picker animated:YES completion:nil];
+}
+
+RCT_REMAP_METHOD(openDocument, openDocument:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.pickerController != nil) {
+      reject(@"picker_busy", @"Another picker is already active", LXError(@"picker_busy", @"Another picker is already active"));
+      return;
+    }
+    self.pickerResolve = resolve;
+    self.pickerReject = reject;
+    self.targetPath = [options[@"toPath"] isKindOfClass:[NSString class]] ? options[@"toPath"] : @"";
+    self.directoryOnly = NO;
+    self.persistSelection = NO;
+    NSArray *extTypes = [options[@"extTypes"] isKindOfClass:[NSArray class]] ? options[@"extTypes"] : @[];
+    [self presentPickerWithTypes:LXDocumentTypesFromExtensions(extTypes, NO)];
+  });
+}
+
+RCT_REMAP_METHOD(openDocumentTree, openDocumentTree:(BOOL)isPersist resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.pickerController != nil) {
+      reject(@"picker_busy", @"Another picker is already active", LXError(@"picker_busy", @"Another picker is already active"));
+      return;
+    }
+    self.pickerResolve = resolve;
+    self.pickerReject = reject;
+    self.targetPath = @"";
+    self.directoryOnly = YES;
+    self.persistSelection = isPersist;
+    [self presentPickerWithTypes:LXDocumentTypesFromExtensions(@[], YES)];
+  });
+}
+
+RCT_REMAP_METHOD(releasePersistableUriPermission, releasePersistableUriPermission:(NSString *)path resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSMutableDictionary<NSString *, NSString *> *bookmarks = LXLoadManagedBookmarks();
+  [bookmarks removeObjectForKey:path];
+  LXSaveManagedBookmarks(bookmarks);
+
+  NSURL *activeURL = LXActiveSecurityScopedURLs()[path];
+  if (activeURL != nil) {
+    [activeURL stopAccessingSecurityScopedResource];
+    [LXActiveSecurityScopedURLs() removeObjectForKey:path];
+  }
+  resolve(@(YES));
+}
+
+RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSMutableDictionary<NSString *, NSString *> *bookmarks = LXLoadManagedBookmarks();
+  NSMutableArray<NSString *> *paths = [NSMutableArray array];
+  NSMutableDictionary<NSString *, NSString *> *normalizedBookmarks = [NSMutableDictionary dictionary];
+
+  for (NSString *storedPath in bookmarks.allKeys) {
+    NSData *bookmarkData = LXBase64Decode(bookmarks[storedPath]);
+    if (!bookmarkData.length) continue;
+
+    BOOL stale = NO;
+    NSError *error = nil;
+    NSURL *url = [NSURL URLByResolvingBookmarkData:bookmarkData options:NSURLBookmarkResolutionWithSecurityScope relativeToURL:nil bookmarkDataIsStale:&stale error:&error];
+    if (url == nil) continue;
+
+    NSString *resolvedPath = LXPathKeyForURL(url);
+    BOOL started = [url startAccessingSecurityScopedResource];
+    if (started) LXActiveSecurityScopedURLs()[resolvedPath] = url;
+
+    NSString *bookmarkBase64 = bookmarks[storedPath];
+    if (stale) {
+      NSError *bookmarkError = nil;
+      NSData *refreshedBookmark = [url bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:&bookmarkError];
+      if (refreshedBookmark.length) bookmarkBase64 = LXBase64Encode(refreshedBookmark);
+    }
+    normalizedBookmarks[resolvedPath] = bookmarkBase64;
+    [paths addObject:resolvedPath];
+  }
+
+  LXSaveManagedBookmarks(normalizedBookmarks);
+  resolve(paths);
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+  [controller dismissViewControllerAnimated:YES completion:nil];
+  NSError *error = LXError(@"picker_cancelled", @"Document selection was cancelled");
+  [self rejectPickerWithCode:@"picker_cancelled" message:@"Document selection was cancelled" error:error];
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+  NSURL *pickedURL = urls.firstObject;
+  [controller dismissViewControllerAnimated:YES completion:nil];
+
+  if (pickedURL == nil) {
+    NSError *error = LXError(@"picker_empty", @"No document was selected");
+    [self rejectPickerWithCode:@"picker_empty" message:@"No document was selected" error:error];
+    return;
+  }
+
+  BOOL startedAccessing = [pickedURL startAccessingSecurityScopedResource];
+  NSError *error = nil;
+
+  if (self.directoryOnly) {
+    NSString *pathKey = LXPathKeyForURL(pickedURL);
+    if (startedAccessing) LXActiveSecurityScopedURLs()[pathKey] = pickedURL;
+
+    if (self.persistSelection) {
+      NSData *bookmarkData = [pickedURL bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+      if (bookmarkData == nil) {
+        if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
+        [self rejectPickerWithCode:@"bookmark_failed" message:error.localizedDescription ?: @"Failed to store folder permission" error:error];
+        return;
+      }
+      NSMutableDictionary<NSString *, NSString *> *bookmarks = LXLoadManagedBookmarks();
+      bookmarks[pathKey] = LXBase64Encode(bookmarkData);
+      LXSaveManagedBookmarks(bookmarks);
+    }
+
+    NSMutableDictionary *result = [[LXFileInfoFromURL(pickedURL) mutableCopy] ?: [NSMutableDictionary dictionary]];
+    if (self.pickerResolve != nil) self.pickerResolve(result);
+    [self resetPickerState];
+    return;
+  }
+
+  NSURL *targetURL = LXPrepareImportedFileTargetURL(self.targetPath ?: @"", pickedURL, &error);
+  if (targetURL == nil) {
+    if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
+    [self rejectPickerWithCode:@"copy_target_failed" message:error.localizedDescription ?: @"Failed to prepare imported file path" error:error];
+    return;
+  }
+
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  [fileManager removeItemAtURL:targetURL error:nil];
+  if (![fileManager copyItemAtURL:pickedURL toURL:targetURL error:&error]) {
+    if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
+    [self rejectPickerWithCode:@"copy_failed" message:error.localizedDescription ?: @"Failed to import selected file" error:error];
+    return;
+  }
+  if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
+
+  NSMutableDictionary *result = [[LXFileInfoFromURL(targetURL) mutableCopy] ?: [NSMutableDictionary dictionary]];
+  result[@"data"] = targetURL.path ?: @"";
+  if (self.pickerResolve != nil) self.pickerResolve(result);
+  [self resetPickerState];
+}
+
+@end
 
 @interface CryptoModule : NSObject<RCTBridgeModule>
 @end

@@ -1,4 +1,5 @@
 import RNFS from 'react-native-fs'
+import { NativeModules } from 'react-native'
 import pako from 'pako'
 
 export interface FileType {
@@ -17,10 +18,18 @@ export interface OpenDocumentOptions {
   toPath?: string
 }
 
+interface OpenDocumentResult extends FileType {
+  data?: string
+}
+
 export type Encoding = 'utf8' | 'ascii' | 'base64'
 export type HashAlgorithm = 'md5' | 'sha1' | 'sha224' | 'sha256' | 'sha384' | 'sha512'
 
 const unsupportedError = (feature: string) => new Error(`${feature} is not supported on ios`)
+const { FilePickerModule } = NativeModules
+
+export const isSystemFileSelectorSupported = typeof FilePickerModule?.openDocument == 'function'
+export const isManagedFolderSupported = typeof FilePickerModule?.openDocumentTree == 'function'
 
 const audioMimeTypeMap: Record<string, string> = {
   mp3: 'audio/mpeg',
@@ -68,17 +77,26 @@ export const privateStorageDirectoryPath = RNFS.DocumentDirectoryPath
 
 export const getExternalStoragePaths = async(_is_removable?: boolean) => [RNFS.DocumentDirectoryPath]
 
-export const selectManagedFolder = async(_isPersist: boolean = false) => {
-  throw unsupportedError('Folder selection')
+export const selectManagedFolder = async(isPersist: boolean = false): Promise<FileType> => {
+  if (!isManagedFolderSupported) throw unsupportedError('Folder selection')
+  return FilePickerModule.openDocumentTree(isPersist) as Promise<FileType>
 }
-export const selectFile = async(_options: OpenDocumentOptions) => {
-  throw unsupportedError('File selection')
+export const selectFile = async(options: OpenDocumentOptions): Promise<OpenDocumentResult> => {
+  if (!isSystemFileSelectorSupported) throw unsupportedError('File selection')
+  return FilePickerModule.openDocument(options) as Promise<OpenDocumentResult>
 }
-export const removeManagedFolder = async(_path: string) => {
-  throw unsupportedError('Managed folder removal')
+export const removeManagedFolder = async(path: string) => {
+  if (!isManagedFolderSupported) throw unsupportedError('Managed folder removal')
+  return FilePickerModule.releasePersistableUriPermission(path)
 }
-export const getManagedFolders = async() => []
-export const getPersistedUriList = async() => []
+export const getManagedFolders = async(): Promise<string[]> => {
+  if (!isManagedFolderSupported) return []
+  return FilePickerModule.getPersistedUriPermissions() as Promise<string[]>
+}
+export const getPersistedUriList = async(): Promise<string[]> => {
+  if (!isManagedFolderSupported) return []
+  return FilePickerModule.getPersistedUriPermissions() as Promise<string[]>
+}
 
 export const readDir = async(path: string): Promise<FileType[]> => {
   const list = await RNFS.readDir(normalizePath(path))

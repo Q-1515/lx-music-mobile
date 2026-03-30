@@ -686,7 +686,7 @@ RCT_EXPORT_MODULE();
   JSContext *context = [[JSContext alloc] init];
   self.jsContext = context;
 
-  __weak typeof(self) weakSelf = self;
+  __weak UserApiModule *weakSelf = self;
   __block NSString *lastException = nil;
   context.exceptionHandler = ^(JSContext *ctx, JSValue *exception) {
     ctx.exception = exception;
@@ -797,19 +797,20 @@ RCT_EXPORT_METHOD(loadScript:(NSDictionary *)data) {
       return;
     }
 
+    __weak UserApiModule *weakSelf = self;
     __block NSString *lastException = nil;
     self.jsContext.exceptionHandler = ^(JSContext *ctx, JSValue *exception) {
       ctx.exception = exception;
       lastException = exception.toString ?: @"Unknown JavaScript exception";
-      [self emitLogWithType:@"error" message:[NSString stringWithFormat:@"Call script error: %@", lastException]];
+      [weakSelf emitLogWithType:@"error" message:[NSString stringWithFormat:@"Call script error: %@", lastException]];
     };
 
     [self.jsContext evaluateScript:data[@"script"] ?: @""];
     if (lastException.length) {
-      [self callJSAction:@"__run_error__" data:nil];
-      if (!self.initSent) {
-        self.initSent = YES;
-        [self emitInitFailed:lastException];
+      [weakSelf callJSAction:@"__run_error__" data:nil];
+      if (!weakSelf.initSent) {
+        weakSelf.initSent = YES;
+        [weakSelf emitInitFailed:lastException];
       }
     }
   });

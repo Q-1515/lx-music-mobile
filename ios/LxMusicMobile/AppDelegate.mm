@@ -572,7 +572,7 @@ RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResol
 
     BOOL stale = NO;
     NSError *error = nil;
-    NSURL *url = [NSURL URLByResolvingBookmarkData:bookmarkData options:NSURLBookmarkResolutionWithSecurityScope relativeToURL:nil bookmarkDataIsStale:&stale error:&error];
+    NSURL *url = [NSURL URLByResolvingBookmarkData:bookmarkData options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:&error];
     if (url == nil) continue;
 
     NSString *resolvedPath = LXPathKeyForURL(url);
@@ -582,7 +582,7 @@ RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResol
     NSString *bookmarkBase64 = bookmarks[storedPath];
     if (stale) {
       NSError *bookmarkError = nil;
-      NSData *refreshedBookmark = [url bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:&bookmarkError];
+      NSData *refreshedBookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&bookmarkError];
       if (refreshedBookmark.length) bookmarkBase64 = LXBase64Encode(refreshedBookmark);
     }
     normalizedBookmarks[resolvedPath] = bookmarkBase64;
@@ -617,7 +617,7 @@ RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResol
     if (startedAccessing) LXActiveSecurityScopedURLs()[pathKey] = pickedURL;
 
     if (self.persistSelection) {
-      NSData *bookmarkData = [pickedURL bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+      NSData *bookmarkData = [pickedURL bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
       if (bookmarkData == nil) {
         if (startedAccessing) [pickedURL stopAccessingSecurityScopedResource];
         [self rejectPickerWithCode:@"bookmark_failed" message:error.localizedDescription ?: @"Failed to store folder permission" error:error];

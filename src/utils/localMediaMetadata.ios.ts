@@ -1,3 +1,4 @@
+import { NativeModules } from 'react-native'
 import { temporaryDirectoryPath, readDir, unlink, extname, stat } from '@/utils/fs'
 
 export interface MusicMetadata {
@@ -15,19 +16,23 @@ export type MusicMetadataFull = MusicMetadata
 
 let nativeLocalMediaMetadata: null | {
   readMetadata?: (filePath: string) => Promise<MusicMetadataFull | null>
-  writeMetadata?: (filePath: string, metadata: MusicMetadataFull) => Promise<void>
+  writeMetadata?: (filePath: string, metadata: Pick<MusicMetadataFull, 'albumName' | 'singer' | 'name'>, isOverwrite?: boolean) => Promise<void>
   writePic?: (filePath: string, picPath: string) => Promise<void>
-  readLyric?: (filePath: string, raw?: boolean) => Promise<string>
+  readLyric?: (filePath: string, isReadLrcFile?: boolean) => Promise<string>
   writeLyric?: (filePath: string, lyric: string) => Promise<void>
   readPic?: (filePath: string, targetPath: string) => Promise<string>
 } = null
 
-try {
-  // Keep the require inside a try block so missing iOS native linkage does not crash the app.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  nativeLocalMediaMetadata = require('react-native-local-media-metadata')
-} catch {
-  nativeLocalMediaMetadata = null
+if (NativeModules.LocalMediaMetadata) {
+  nativeLocalMediaMetadata = NativeModules.LocalMediaMetadata
+} else {
+  try {
+    // Keep the require inside a try block so missing iOS native linkage does not crash the app.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    nativeLocalMediaMetadata = require('react-native-local-media-metadata')
+  } catch {
+    nativeLocalMediaMetadata = null
+  }
 }
 
 let cleared = false
@@ -89,7 +94,11 @@ export const readMetadata = async(filePath: string): Promise<MusicMetadataFull |
 
 export const writeMetadata = async(filePath: string, metadata: MusicMetadataFull): Promise<void> => {
   if (nativeLocalMediaMetadata?.writeMetadata) {
-    return nativeLocalMediaMetadata.writeMetadata(filePath, metadata)
+    return nativeLocalMediaMetadata.writeMetadata(filePath, {
+      name: metadata.name,
+      singer: metadata.singer,
+      albumName: metadata.albumName,
+    }, false)
   }
   throw unsupportedError
 }
@@ -103,7 +112,7 @@ export const writePic = async(filePath: string, picPath: string): Promise<void> 
 
 export const readLyric = async(filePath: string, raw?: boolean): Promise<string> => {
   if (nativeLocalMediaMetadata?.readLyric) {
-    return nativeLocalMediaMetadata.readLyric(filePath, raw)
+    return nativeLocalMediaMetadata.readLyric(filePath, raw ?? true)
   }
   throw unsupportedError
 }

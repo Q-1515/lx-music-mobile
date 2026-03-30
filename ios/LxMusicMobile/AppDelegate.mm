@@ -7,6 +7,7 @@
 #import <ReactNativeNavigation/ReactNativeNavigation.h>
 #import <Security/Security.h>
 #import <MobileCoreServices/MobileCoreServices.h>
+#import <AVFoundation/AVFoundation.h>
 
 static NSData *LXBase64Decode(NSString *value) {
   if (value == nil) return [NSData data];
@@ -644,6 +645,275 @@ RCT_REMAP_METHOD(getPersistedUriPermissions, getPersistedUriPermissionsWithResol
   result[@"data"] = targetURL.path ?: @"";
   if (self.pickerResolve != nil) self.pickerResolve(result);
   [self resetPickerState];
+}
+
+@end
+
+static NSString *LXMediaMetadataSidecarPath(NSString *filePath) {
+  return [filePath stringByAppendingString:@".lxmeta.json"];
+}
+
+static NSString *LXMediaLyricSidecarPath(NSString *filePath) {
+  NSString *basePath = [filePath stringByDeletingPathExtension];
+  return [basePath stringByAppendingPathExtension:@"lrc"];
+}
+
+static NSString *LXMediaCoverSidecarPrefix(NSString *filePath) {
+  return [filePath stringByAppendingString:@".lxcover"];
+}
+
+static NSString *LXAudioExtForPath(NSString *filePath) {
+  NSString *ext = filePath.pathExtension.lowercaseString;
+  if ([ext isEqualToString:@"flac"] ||
+      [ext isEqualToString:@"ogg"] ||
+      [ext isEqualToString:@"wav"] ||
+      [ext isEqualToString:@"m4a"] ||
+      [ext isEqualToString:@"aac"]) return ext;
+  return @"mp3";
+}
+
+static NSDictionary *LXReadJSONFile(NSString *path) {
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  if (!data.length) return @{};
+  id result = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+  return [result isKindOfClass:[NSDictionary class]] ? result : @{};
+}
+
+static BOOL LXWriteJSONFile(NSString *path, NSDictionary *json, NSError **error) {
+  NSData *data = [NSJSONSerialization dataWithJSONObject:json options:0 error:error];
+  if (!data) return NO;
+  return [data writeToFile:path options:NSDataWritingAtomic error:error];
+}
+
+static NSArray<AVMetadataItem *> *LXAllMetadataItems(AVAsset *asset) {
+  NSMutableArray<AVMetadataItem *> *items = [NSMutableArray array];
+  [items addObjectsFromArray:asset.commonMetadata];
+  for (NSString *format in asset.availableMetadataFormats) {
+    [items addObjectsFromArray:[asset metadataForFormat:format]];
+  }
+  return items;
+}
+
+static NSString *LXMetadataStringValue(id value) {
+  if ([value isKindOfClass:[NSString class]]) return value;
+  if ([value isKindOfClass:[NSNumber class]]) return ((NSNumber *)value).stringValue;
+  return @"";
+}
+
+static NSString *LXFindMetadataString(AVAsset *asset, NSArray<NSString *> *commonKeys, NSArray<NSString *> *identifierKeywords) {
+  NSArray<AVMetadataItem *> *items = LXAllMetadataItems(asset);
+  for (AVMetadataItem *item in items) {
+    NSString *commonKey = item.commonKey.lowercaseString ?: @"";
+    NSString *identifier = item.identifier.lowercaseString ?: @"";
+    BOOL matched = [commonKeys containsObject:commonKey];
+    if (!matched) {
+      for (NSString *keyword in identifierKeywords) {
+        if ([identifier containsString:keyword]) {
+          matched = YES;
+          break;
+        }
+      }
+    }
+    if (!matched) continue;
+    NSString *stringValue = item.stringValue ?: LXMetadataStringValue(item.value);
+    if (stringValue.length) return stringValue;
+  }
+  return @"";
+}
+
+static NSData *LXFindArtworkData(AVAsset *asset) {
+  NSArray<AVMetadataItem *> *items = LXAllMetadataItems(asset);
+  for (AVMetadataItem *item in items) {
+    NSString *commonKey = item.commonKey.lowercaseString ?: @"";
+    NSString *identifier = item.identifier.lowercaseString ?: @"";
+    if (![commonKey isEqualToString:@"artwork"] &&
+        ![identifier containsString:@"artwork"] &&
+        ![identifier containsString:@"covr"] &&
+        ![identifier containsString:@"apic"]) continue;
+
+    if (item.dataValue.length) return item.dataValue;
+    if ([item.value isKindOfClass:[NSData class]]) return item.value;
+    if ([item.value isKindOfClass:[NSDictionary class]]) {
+      id data = ((NSDictionary *)item.value)[@"data"];
+      if ([data isKindOfClass:[NSData class]]) return data;
+    }
+  }
+  return nil;
+}
+
+static NSString *LXImageExtensionForData(NSData *data) {
+  if (data.length >= 8) {
+    const uint8_t *bytes = (const uint8_t *)data.bytes;
+    if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return @"png";
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8) return @"jpg";
+    if (bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F') return @"gif";
+  }
+  return @"jpg";
+}
+
+static NSString *LXFindCoverSidecarPath(NSString *filePath) {
+  NSString *directory = [filePath stringByDeletingLastPathComponent];
+  NSString *prefix = [[filePath.lastPathComponent stringByAppendingString:@".lxcover."] lowercaseString];
+  NSArray<NSString *> *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:nil] ?: @[];
+  for (NSString *name in contents) {
+    if ([name.lowercaseString hasPrefix:prefix]) {
+      return [directory stringByAppendingPathComponent:name];
+    }
+  }
+  return nil;
+}
+
+static void LXRemoveCoverSidecars(NSString *filePath) {
+  NSString *directory = [filePath stringByDeletingLastPathComponent];
+  NSString *prefix = [[filePath.lastPathComponent stringByAppendingString:@".lxcover."] lowercaseString];
+  NSArray<NSString *> *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:nil] ?: @[];
+  for (NSString *name in contents) {
+    if ([name.lowercaseString hasPrefix:prefix]) {
+      NSString *target = [directory stringByAppendingPathComponent:name];
+      [[NSFileManager defaultManager] removeItemAtPath:target error:nil];
+    }
+  }
+}
+
+@interface LocalMediaMetadata : NSObject<RCTBridgeModule>
+@end
+
+@implementation LocalMediaMetadata
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return NO;
+}
+
+RCT_REMAP_METHOD(readMetadata, readMetadata:(NSString *)filePath resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+  AVURLAsset *asset = [AVURLAsset URLAssetWithURL:fileURL options:nil];
+  NSDictionary *sidecar = LXReadJSONFile(LXMediaMetadataSidecarPath(filePath));
+  NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:nil] ?: @{};
+
+  NSString *title = sidecar[@"name"];
+  if (![title isKindOfClass:[NSString class]] || !title.length) {
+    title = LXFindMetadataString(asset, @[ @"title" ], @[ @"title" ]);
+  }
+  if (!title.length) title = fileURL.URLByDeletingPathExtension.lastPathComponent ?: fileURL.lastPathComponent ?: @"";
+
+  NSString *artist = sidecar[@"singer"];
+  if (![artist isKindOfClass:[NSString class]] || !artist.length) {
+    artist = LXFindMetadataString(asset, @[ @"artist", @"creator" ], @[ @"artist", @"author", @"performer" ]);
+  }
+  if (!artist.length) artist = @"";
+
+  NSString *albumName = sidecar[@"albumName"];
+  if (![albumName isKindOfClass:[NSString class]] || !albumName.length) {
+    albumName = LXFindMetadataString(asset, @[ @"albumname" ], @[ @"album" ]);
+  }
+  if (!albumName.length) albumName = @"";
+
+  AVAssetTrack *audioTrack = [asset tracksWithMediaType:AVMediaTypeAudio].firstObject;
+  NSInteger bitrate = audioTrack != nil ? (NSInteger)llround(audioTrack.estimatedDataRate / 1000.0) : 0;
+  Float64 duration = CMTimeGetSeconds(asset.duration);
+  if (!isfinite(duration) || duration < 0) duration = 0;
+
+  NSString *ext = LXAudioExtForPath(filePath);
+  resolve(@{
+    @"type": ext,
+    @"bitrate": @(bitrate).stringValue ?: @"0",
+    @"interval": @((NSInteger)llround(duration)),
+    @"size": attributes[NSFileSize] ?: @0,
+    @"ext": ext,
+    @"albumName": albumName,
+    @"singer": artist,
+    @"name": title,
+  });
+}
+
+RCT_REMAP_METHOD(writeMetadata, writeMetadata:(NSString *)filePath metadata:(NSDictionary *)metadata overwrite:(BOOL)isOverwrite resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSMutableDictionary *sidecar = [LXReadJSONFile(LXMediaMetadataSidecarPath(filePath)) mutableCopy];
+  if (sidecar == nil) sidecar = [NSMutableDictionary dictionary];
+
+  for (NSString *key in @[ @"name", @"singer", @"albumName" ]) {
+    NSString *value = [metadata[key] isKindOfClass:[NSString class]] ? metadata[key] : @"";
+    sidecar[key] = value;
+  }
+
+  NSError *error = nil;
+  if (!LXWriteJSONFile(LXMediaMetadataSidecarPath(filePath), sidecar, &error)) {
+    reject(@"write_metadata_failed", error.localizedDescription ?: @"Failed to write metadata", error);
+    return;
+  }
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(readPic, readPic:(NSString *)filePath targetPath:(NSString *)targetPath resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSString *sidecarCoverPath = LXFindCoverSidecarPath(filePath);
+  NSData *coverData = nil;
+  NSString *ext = @"jpg";
+  if (sidecarCoverPath.length) {
+    coverData = [NSData dataWithContentsOfFile:sidecarCoverPath];
+    ext = sidecarCoverPath.pathExtension.length ? sidecarCoverPath.pathExtension.lowercaseString : @"jpg";
+  } else {
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:filePath] options:nil];
+    coverData = LXFindArtworkData(asset);
+    if (coverData.length) ext = LXImageExtensionForData(coverData);
+  }
+
+  if (!coverData.length) {
+    reject(@"read_pic_failed", @"No picture metadata found", nil);
+    return;
+  }
+
+  NSError *error = nil;
+  [[NSFileManager defaultManager] createDirectoryAtPath:targetPath withIntermediateDirectories:YES attributes:nil error:&error];
+  if (error != nil) {
+    reject(@"read_pic_failed", error.localizedDescription ?: @"Failed to create picture cache directory", error);
+    return;
+  }
+
+  NSString *targetFilePath = [targetPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.%@", LXSHA1(filePath), ext]];
+  if (![coverData writeToFile:targetFilePath options:NSDataWritingAtomic error:&error]) {
+    reject(@"read_pic_failed", error.localizedDescription ?: @"Failed to save picture", error);
+    return;
+  }
+
+  resolve(targetFilePath);
+}
+
+RCT_REMAP_METHOD(writePic, writePic:(NSString *)filePath picPath:(NSString *)picPath resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSString *ext = picPath.pathExtension.lowercaseString.length ? picPath.pathExtension.lowercaseString : @"jpg";
+  NSString *targetPath = [NSString stringWithFormat:@"%@.%@", LXMediaCoverSidecarPrefix(filePath), ext];
+  NSError *error = nil;
+  LXRemoveCoverSidecars(filePath);
+  if (![[NSFileManager defaultManager] copyItemAtPath:picPath toPath:targetPath error:&error]) {
+    reject(@"write_pic_failed", error.localizedDescription ?: @"Failed to save picture", error);
+    return;
+  }
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(readLyric, readLyric:(NSString *)filePath isReadLrcFile:(BOOL)isReadLrcFile resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  if (isReadLrcFile) {
+    NSString *lrcPath = LXMediaLyricSidecarPath(filePath);
+    if ([[NSFileManager defaultManager] fileExistsAtPath:lrcPath]) {
+      NSString *lyric = [NSString stringWithContentsOfFile:lrcPath encoding:NSUTF8StringEncoding error:nil];
+      resolve(lyric ?: @"");
+      return;
+    }
+  }
+
+  AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:filePath] options:nil];
+  NSString *lyric = LXFindMetadataString(asset, @[], @[ @"lyric", @"lyrics", @"uslt" ]);
+  resolve(lyric ?: @"");
+}
+
+RCT_REMAP_METHOD(writeLyric, writeLyric:(NSString *)filePath lyric:(NSString *)lyric resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSError *error = nil;
+  NSString *lrcPath = LXMediaLyricSidecarPath(filePath);
+  if (![lyric ?: @"" writeToFile:lrcPath atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+    reject(@"write_lyric_failed", error.localizedDescription ?: @"Failed to save lyric", error);
+    return;
+  }
+  resolve(nil);
 }
 
 @end

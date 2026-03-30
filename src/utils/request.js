@@ -183,8 +183,8 @@ const fetchData = (url, { timeout = 15000, ...options }) => {
         signal: controller.signal,
       }).then(resp => (options.binary ? resp.blob() : resp.text()).then(text => {
         // console.log(options, headers, text)
-        log.error('请求完成', options, text)
-        log.error('text result:', typeof text, text ? text.slice(0, 100) : text)
+        // log.error('请求完成', options, text)
+        // log.error('text result:', typeof text, text ? text.slice(0, 100) : text)
         return {
           headers: resp.headers.map,
           body: text,

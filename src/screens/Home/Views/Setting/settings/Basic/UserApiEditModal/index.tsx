@@ -102,13 +102,14 @@ export default forwardRef<UserApiEditModalType, {}>((props, ref) => {
   const handleImportAction = (action: 'local' | 'online') => {
     switch (action) {
       case 'local':
-        dialogRef.current?.setVisible(false)
-        setTimeout(() => {
+        requestAnimationFrame(() => {
           scriptImportExportRef.current?.import()
-        }, 320)
+        })
         break
       case 'online':
-        scriptImportOnlineRef.current?.show()
+        requestAnimationFrame(() => {
+          scriptImportOnlineRef.current?.show()
+        })
         break
     }
   }

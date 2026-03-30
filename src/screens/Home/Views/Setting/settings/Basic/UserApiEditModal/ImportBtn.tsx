@@ -1,8 +1,6 @@
 import { useMemo } from 'react'
-import { ActionSheetIOS, Platform } from 'react-native'
 
 import DorpDownMenu, { type DorpDownMenuProps as _DorpDownMenuProps } from '@/components/common/DorpDownMenu'
-import Button from '@/components/common/Button'
 import Text from '@/components/common/Text'
 import { useI18n } from '@/lang'
 import { state } from '@/store/userApi'
@@ -41,49 +39,14 @@ export default ({ btnStyle, onImportAction }: BtnProps) => {
     onImportAction?.(action)
   }
 
-  const handlePress = () => {
-    if (Platform.OS != 'ios') return
-    if (state.list.length > 20) {
-      void tipDialog({
-        message: t('user_api_max_tip'),
-        btnText: t('ok'),
-      })
-      return
-    }
-
-    setTimeout(() => {
-      ActionSheetIOS.showActionSheetWithOptions({
-        options: [
-          t('user_api_btn_import_local'),
-          t('user_api_btn_import_online'),
-          t('close'),
-        ],
-        cancelButtonIndex: 2,
-      }, (buttonIndex) => {
-        if (buttonIndex === 0) {
-          handleAction({ action: 'local', label: t('user_api_btn_import_local') })
-        } else if (buttonIndex === 1) {
-          handleAction({ action: 'online', label: t('user_api_btn_import_online') })
-        }
-      })
-    }, 260)
-  }
-
-
-  return Platform.OS == 'ios'
-    ? (
-        <Button style={btnStyle} onPress={handlePress}>
-          <Text size={14} color={theme['c-button-font']}>{t('user_api_btn_import')}</Text>
-        </Button>
-      )
-    : (
-      <DorpDownMenu
-        btnStyle={btnStyle}
-        menus={importTypes}
-        center
-        onPress={handleAction}
-      >
-        <Text size={14} color={theme['c-button-font']}>{t('user_api_btn_import')}</Text>
-      </DorpDownMenu>
-    )
+  return (
+    <DorpDownMenu
+      btnStyle={btnStyle}
+      menus={importTypes}
+      center
+      onPress={handleAction}
+    >
+      <Text size={14} color={theme['c-button-font']}>{t('user_api_btn_import')}</Text>
+    </DorpDownMenu>
+  )
 }

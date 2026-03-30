@@ -6,7 +6,6 @@
 #import <React/RCTUtils.h>
 #import <ReactNativeNavigation/ReactNativeNavigation.h>
 #import <Security/Security.h>
-#import <MobileCoreServices/MobileCoreServices.h>
 #import <AVFoundation/AVFoundation.h>
 #import <math.h>
 
@@ -430,20 +429,11 @@ static NSDictionary *LXFileInfoFromURL(NSURL *url) {
   };
 }
 
-static NSArray<NSString *> *LXDocumentTypesFromExtensions(NSArray<NSString *> *extTypes, BOOL directoryOnly) {
+static NSArray<NSString *> *LXDocumentTypesFromExtensions(__unused NSArray<NSString *> *extTypes, BOOL directoryOnly) {
   if (directoryOnly) return @[ @"public.folder" ];
-
-  NSMutableArray<NSString *> *types = [NSMutableArray array];
-  for (id ext in extTypes) {
-    if (![ext isKindOfClass:[NSString class]]) continue;
-    NSString *normalizedExt = [(NSString *)ext lowercaseString];
-    if ([normalizedExt hasPrefix:@"."]) normalizedExt = [normalizedExt substringFromIndex:1];
-    if (!normalizedExt.length) continue;
-    CFStringRef uti = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, (__bridge CFStringRef)normalizedExt, NULL);
-    if (uti != NULL) [types addObject:(__bridge_transfer NSString *)uti];
-  }
-  if (!types.count) [types addObject:@"public.item"];
-  return types;
+  // Keep the picker types conservative on iOS. JS already validates extensions after selection,
+  // so avoiding UTI conversion here reduces compile/linkage risk across SDK versions.
+  return @[ @"public.item" ];
 }
 
 static NSURL *LXPrepareImportedFileTargetURL(NSString *targetPath, NSURL *sourceURL, NSError **error) {

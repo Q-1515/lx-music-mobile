@@ -26,6 +26,7 @@ const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
     elapsedTime?: number
     isLiveStream?: boolean
   }) => Promise<void>
+  getDuration?: () => Promise<number>
 }
 
 const formatMusicInfo = (musicInfo: LX.Player.PlayMusic) => {
@@ -123,6 +124,13 @@ export const getCurrentTrack = async() => {
   return list[currentTrackIndex]
 }
 
+const getTrackDuration = async() => {
+  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getDuration == 'function') {
+    return NativeTrackPlayerModule.getDuration()
+  }
+  return TrackPlayer.getDuration()
+}
+
 export const clearTracks = () => {
   list.length = 0
   prevArtwork = undefined
@@ -143,7 +151,7 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
 
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
   if (!force && isPlay == state.isPlaying) {
-    const duration = await TrackPlayer.getDuration()
+    const duration = await getTrackDuration()
     if (state.prevDuration != duration) {
       state.prevDuration = duration
       const trackInfo = await getCurrentTrack()
@@ -152,7 +160,7 @@ export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: bool
       }
     }
   } else {
-    const [duration, trackInfo] = await Promise.all([TrackPlayer.getDuration(), getCurrentTrack()])
+    const [duration, trackInfo] = await Promise.all([getTrackDuration(), getCurrentTrack()])
     state.prevDuration = duration
     if (trackInfo && musicInfo) {
       delayUpdateMusicInfo(musicInfo, lyric)

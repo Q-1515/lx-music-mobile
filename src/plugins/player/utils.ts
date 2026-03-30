@@ -20,6 +20,8 @@ const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
     elapsedTime?: number
     isLiveStream?: boolean
   }) => Promise<void>
+  getPosition?: () => Promise<number>
+  getDuration?: () => Promise<number>
 }
 
 const emptyIdRxp = /\/\/default$/
@@ -169,8 +171,18 @@ export const setResource = (musicInfo: LX.Player.PlayMusic, url: string, duratio
 }
 
 export const setPlay = async() => TrackPlayer.play()
-export const getPosition = async() => TrackPlayer.getPosition()
-export const getDuration = async() => TrackPlayer.getDuration()
+export const getPosition = async() => {
+  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getPosition == 'function') {
+    return NativeTrackPlayerModule.getPosition()
+  }
+  return TrackPlayer.getPosition()
+}
+export const getDuration = async() => {
+  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getDuration == 'function') {
+    return NativeTrackPlayerModule.getDuration()
+  }
+  return TrackPlayer.getDuration()
+}
 export const setStop = async() => {
   await TrackPlayer.stop()
   if (Platform.OS != 'ios' && !isEmpty()) await TrackPlayer.skipToNext()

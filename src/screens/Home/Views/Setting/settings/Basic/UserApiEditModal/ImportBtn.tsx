@@ -12,10 +12,11 @@ import { useTheme } from '@/store/theme/hook'
 
 interface BtnProps {
   btnStyle?: _DorpDownMenuProps<any[]>['btnStyle']
+  beforeLocalImport?: () => void
 }
 
 
-export default ({ btnStyle }: BtnProps) => {
+export default ({ btnStyle, beforeLocalImport }: BtnProps) => {
   const t = useI18n()
   const theme = useTheme()
   const scriptImportExportRef = useRef<ScriptImportExportType>(null)
@@ -40,7 +41,10 @@ export default ({ btnStyle }: BtnProps) => {
     }
 
     if (action == 'local') {
-      scriptImportExportRef.current?.import()
+      beforeLocalImport?.()
+      setTimeout(() => {
+        scriptImportExportRef.current?.import()
+      }, 320)
     } else {
       scriptImportOnlineRef.current?.show()
     }

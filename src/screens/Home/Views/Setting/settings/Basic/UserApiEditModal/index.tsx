@@ -95,6 +95,10 @@ export default forwardRef<UserApiEditModalType, {}>((props, ref) => {
     dialogRef.current?.setVisible(false)
   }
 
+  const handlePrepareLocalImport = () => {
+    dialogRef.current?.setVisible(false)
+  }
+
   const openFAQPage = () => {
     void openUrl('https://lyswhut.github.io/lx-music-doc/mobile/custom-source')
   }
@@ -123,7 +127,7 @@ export default forwardRef<UserApiEditModalType, {}>((props, ref) => {
               <Button style={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} onPress={handleCancel}>
                 <Text size={14} color={theme['c-button-font']}>{t('close')}</Text>
               </Button>
-              <ImportBtn btnStyle={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} />
+              <ImportBtn btnStyle={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} beforeLocalImport={handlePrepareLocalImport} />
             </View>
           </Dialog>
         ) : null

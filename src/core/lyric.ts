@@ -117,12 +117,13 @@ export const seek = (time: number) => {
 
 export const setLyric = async() => {
   if (!playerState.musicInfo.id) return
-  if (playerState.musicInfo.lrc) {
+  const lyric = playerState.musicInfo.lxlrc || playerState.musicInfo.lrc
+  if (lyric) {
     let tlrc = ''
     let rlrc = ''
     if (playerState.musicInfo.tlrc) tlrc = playerState.musicInfo.tlrc
     if (playerState.musicInfo.rlrc) rlrc = playerState.musicInfo.rlrc
-    await handleSetLyric(playerState.musicInfo.lrc, tlrc, rlrc)
+    await handleSetLyric(lyric, tlrc, rlrc)
   }
 
   if (playerState.isPlay) play()

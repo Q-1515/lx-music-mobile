@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react'
 import Lyric, { type Lines } from 'lrc-file-parser'
+import LxLyricPlayer, { type LxLyricLine } from './lxLyricPlayer'
 // import { getStore, subscribe } from '@/store'
-export type Line = Lines[number]
+export type Line = (Lines[number] & { rawText?: string, words?: { startTime: number, duration: number, text: string }[] }) | LxLyricLine
+type PlayerLines = Line[]
 type PlayHook = (line: number, text: string) => void
-type SetLyricHook = (lines: Lines) => void
+type SetLyricHook = (lines: PlayerLines) => void
+
+const lxLyricTextRxp = /<\d+,\d+>/
 
 const lrcTools = {
   isInited: false,
   lrc: null as Lyric | null,
+  lxLrc: null as LxLyricPlayer | null,
+  useLxPlayer: false,
   currentLineData: { line: 0, text: '' },
-  currentLines: [] as Lines,
+  currentLines: [] as PlayerLines,
   playHooks: [] as PlayHook[],
   setLyricHooks: [] as SetLyricHook[],
   isPlay: false,
@@ -26,6 +32,11 @@ const lrcTools = {
       onSetLyric: this.onSetLyric.bind(this),
       offset: 100, // offset time(ms), default is 150 ms
     })
+    this.lxLrc = new LxLyricPlayer({
+      onPlay: this.onPlay.bind(this),
+      onSetLyric: this.onSetLyric.bind(this),
+      offset: 100,
+    })
   },
   onPlay(line: number, text: string) {
     this.currentLineData.line = line
@@ -33,7 +44,7 @@ const lrcTools = {
     this.currentLineData.text = text
     for (const hook of this.playHooks) hook(line, text)
   },
-  onSetLyric(lines: Lines) {
+  onSetLyric(lines: PlayerLines) {
     this.currentLines = lines
     this.currentLineData.line = 0
     this.currentLineData.text = ''
@@ -58,7 +69,9 @@ const lrcTools = {
     const extendedLyrics = [] as string[]
     if (this.isShowTranslation && this.translationText) extendedLyrics.push(this.translationText)
     if (this.isShowRoma && this.romaText) extendedLyrics.push(this.romaText)
-    this.lrc!.setLyric(this.lyricText, extendedLyrics)
+    this.useLxPlayer = lxLyricTextRxp.test(this.lyricText)
+    if (this.useLxPlayer) this.lxLrc!.setLyric(this.lyricText, extendedLyrics)
+    else this.lrc!.setLyric(this.lyricText, extendedLyrics)
   },
 }
 
@@ -75,7 +88,8 @@ export const setLyric = (lyric: string, translation?: string, romalrc?: string) 
   lrcTools.setLyric()
 }
 export const setPlaybackRate = (playbackRate: number) => {
-  lrcTools.lrc!.setPlaybackRate(playbackRate)
+  if (lrcTools.useLxPlayer) lrcTools.lxLrc!.setPlaybackRate(playbackRate)
+  else lrcTools.lrc!.setPlaybackRate(playbackRate)
 }
 export const toggleTranslation = (isShow: boolean) => {
   lrcTools.isShowTranslation = isShow
@@ -90,12 +104,14 @@ export const toggleRoma = (isShow: boolean) => {
 export const play = (time: number) => {
   // console.log(time)
   lrcTools.isPlay = true
-  lrcTools.lrc!.play(time)
+  if (lrcTools.useLxPlayer) lrcTools.lxLrc!.play(time)
+  else lrcTools.lrc!.play(time)
 }
 export const pause = () => {
   // console.log('pause')
   lrcTools.isPlay = false
-  lrcTools.lrc!.pause()
+  if (lrcTools.useLxPlayer) lrcTools.lxLrc!.pause()
+  else lrcTools.lrc!.pause()
 }
 
 // on lyric play hook
@@ -123,9 +139,9 @@ export const useLrcPlay = (autoUpdate = true) => {
 
 // on lyric set hook
 export const useLrcSet = () => {
-  const [lines, setLines] = useState<Lines>(lrcTools.currentLines)
+  const [lines, setLines] = useState<PlayerLines>(lrcTools.currentLines)
   useEffect(() => {
-    const callback = (lines: Lines) => {
+    const callback: SetLyricHook = (lines) => {
       setLines(lines)
     }
     lrcTools.addSetLyricHook(callback)

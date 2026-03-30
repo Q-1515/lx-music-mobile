@@ -421,6 +421,7 @@ static NSString *LXPrepareImportedFilePath(NSString *targetPath, NSURL *sourceUR
 @property (nonatomic, copy) RCTPromiseRejectBlock pickerReject;
 @property (nonatomic, copy) NSString *targetPath;
 @property (nonatomic, strong) UIDocumentPickerViewController *pickerController;
+@property (nonatomic, assign) BOOL pickerPresenting;
 @end
 
 @implementation FilePickerModule
@@ -436,6 +437,7 @@ RCT_EXPORT_MODULE();
   self.pickerReject = nil;
   self.targetPath = nil;
   self.pickerController = nil;
+  self.pickerPresenting = NO;
 }
 
 - (void)rejectPickerWithCode:(NSString *)code message:(NSString *)message error:(NSError *)error {
@@ -445,7 +447,7 @@ RCT_EXPORT_MODULE();
 
 RCT_REMAP_METHOD(openDocument, openDocument:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
-    if (self.pickerController != nil) {
+    if (self.pickerController != nil || self.pickerPresenting) {
       reject(@"picker_busy", @"Another picker is already active", LXError(@"picker_busy", @"Another picker is already active"));
       return;
     }
@@ -464,8 +466,16 @@ RCT_REMAP_METHOD(openDocument, openDocument:(NSDictionary *)options resolver:(RC
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
     picker.modalPresentationStyle = UIModalPresentationFullScreen;
-    self.pickerController = picker;
-    [controller presentViewController:picker animated:YES completion:nil];
+    self.pickerPresenting = YES;
+    [controller presentViewController:picker animated:YES completion:^{
+      self.pickerController = picker;
+      self.pickerPresenting = NO;
+    }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      if (self.pickerPresenting && self.pickerController == nil) {
+        [self rejectPickerWithCode:@"picker_present" message:@"File picker did not finish presenting" error:LXError(@"picker_present", @"File picker did not finish presenting")];
+      }
+    });
   });
 }
 

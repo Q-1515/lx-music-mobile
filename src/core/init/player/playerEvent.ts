@@ -1,6 +1,6 @@
 import { playNext, setMusicUrl } from '@/core/player/player'
 import { setStatusText } from '@/core/player/playStatus'
-import { getPosition, isEmpty, setStop } from '@/plugins/player'
+import { getPosition, isEmpty, setStop } from '@/plugins/player/utils'
 import { isActive } from '@/utils/tools'
 import BackgroundTimer from 'react-native-background-timer'
 import playerState from '@/store/player/state'

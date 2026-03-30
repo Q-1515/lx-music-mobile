@@ -95,7 +95,7 @@ export default forwardRef<UserApiEditModalType, {}>((props, ref) => {
     dialogRef.current?.setVisible(false)
   }
 
-  const handlePrepareLocalImport = () => {
+  const handlePrepareImport = (_action: 'local' | 'online') => {
     dialogRef.current?.setVisible(false)
   }
 
@@ -127,7 +127,7 @@ export default forwardRef<UserApiEditModalType, {}>((props, ref) => {
               <Button style={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} onPress={handleCancel}>
                 <Text size={14} color={theme['c-button-font']}>{t('close')}</Text>
               </Button>
-              <ImportBtn btnStyle={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} beforeLocalImport={handlePrepareLocalImport} />
+              <ImportBtn btnStyle={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} beforeImport={handlePrepareImport} />
             </View>
           </Dialog>
         ) : null

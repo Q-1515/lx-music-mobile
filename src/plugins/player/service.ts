@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import TrackPlayer, { State as TPState, Event as TPEvent } from 'react-native-track-player'
 import { Platform } from 'react-native'
+import settingState from '@/store/setting/state'
 // import { store } from '@/store'
 // import { action as playerAction, STATUS } from '@/store/modules/player'
 import { isTempId, isEmpty } from './utils'
@@ -92,6 +93,9 @@ const registerPlaybackService = async() => {
         global.app_event.pause()
         break
       case TPState.Playing:
+        if (Platform.OS == 'ios') {
+          void TrackPlayer.setVolume(settingState.setting['player.volume'])
+        }
         global.app_event.playerPlaying()
         global.app_event.play()
         break
@@ -116,6 +120,9 @@ const registerPlaybackService = async() => {
     global.lx.playerTrackId = await getCurrentTrackId()
     if (info.track == null) return
     if (global.lx.isPlayedStop) return handleExitApp('Timeout Exit')
+    if (Platform.OS == 'ios') {
+      void TrackPlayer.setVolume(settingState.setting['player.volume'])
+    }
 
     // console.log('global.lx.playerTrackId====>', global.lx.playerTrackId)
     if (Platform.OS != 'ios' && isEmpty()) {

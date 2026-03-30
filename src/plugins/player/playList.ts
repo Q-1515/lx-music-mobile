@@ -124,6 +124,10 @@ export const getCurrentTrack = async() => {
   return list[currentTrackIndex]
 }
 
+const applyCurrentVolume = async() => {
+  await TrackPlayer.setVolume(settingState.setting['player.volume'])
+}
+
 const getTrackDuration = async() => {
   if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getDuration == 'function') {
     return NativeTrackPlayerModule.getDuration()
@@ -147,6 +151,7 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
   if (position > 0) await TrackPlayer.seekTo(position)
   if (isPlaying) await TrackPlayer.play()
   else await TrackPlayer.pause()
+  await applyCurrentVolume()
 }
 
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
@@ -199,6 +204,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
       // if (startupAutoPlay) store.dispatch(playerAction.playMusic())
       } else {
         await TrackPlayer.play()
+        await applyCurrentVolume()
       }
     }
   } else {
@@ -206,6 +212,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
     if (!isTempTrack(track.id as string)) {
       await TrackPlayer.seekTo(time)
       await TrackPlayer.play()
+      await applyCurrentVolume()
     }
   }
 

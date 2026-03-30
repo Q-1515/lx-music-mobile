@@ -8,6 +8,7 @@
 #import <Security/Security.h>
 #import <MobileCoreServices/MobileCoreServices.h>
 #import <AVFoundation/AVFoundation.h>
+#import <math.h>
 
 static NSData *LXBase64Decode(NSString *value) {
   if (value == nil) return [NSData data];

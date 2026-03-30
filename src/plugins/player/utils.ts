@@ -171,6 +171,14 @@ export const setVolume = async(num: number) => TrackPlayer.setVolume(num)
 export const setPlaybackRate = async(num: number) => TrackPlayer.setRate(num)
 export const updateNowPlayingTitles = async(duration: number, title: string, artist: string, album: string) => {
   console.log('set playing titles', duration, title, artist, album)
+  if (Platform.OS == 'ios') {
+    return TrackPlayer.updateNowPlayingMetadata({
+      title,
+      artist,
+      album: album || undefined,
+      duration: duration > 0 ? duration / 1000 : 0,
+    }, true)
+  }
   return TrackPlayer.updateNowPlayingTitles(duration, title, artist, album)
 }
 
@@ -243,46 +251,58 @@ export const onStateChange = async(listener: (state: PlayStatus) => void) => {
  */
 // export const playState = callback => TrackPlayer.addEventListener('playback-state', callback)
 
-export const updateOptions = async(options = {
-  // Whether the player should stop running when the app is closed on Android
-  // stopWithApp: true,
+const defaultUpdateOptions = Platform.OS == 'ios'
+  ? {
+      capabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.SeekTo,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+      ],
+    }
+  : {
+      // Whether the player should stop running when the app is closed on Android
+      // stopWithApp: true,
 
-  // An array of media controls capabilities
-  // Can contain CAPABILITY_PLAY, CAPABILITY_PAUSE, CAPABILITY_STOP, CAPABILITY_SEEK_TO,
-  // CAPABILITY_SKIP_TO_NEXT, CAPABILITY_SKIP_TO_PREVIOUS, CAPABILITY_SET_RATING
-  capabilities: [
-    Capability.Play,
-    Capability.Pause,
-    Capability.Stop,
-    Capability.SeekTo,
-    Capability.SkipToNext,
-    Capability.SkipToPrevious,
-  ],
+      // An array of media controls capabilities
+      // Can contain CAPABILITY_PLAY, CAPABILITY_PAUSE, CAPABILITY_STOP, CAPABILITY_SEEK_TO,
+      // CAPABILITY_SKIP_TO_NEXT, CAPABILITY_SKIP_TO_PREVIOUS, CAPABILITY_SET_RATING
+      capabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.Stop,
+        Capability.SeekTo,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+      ],
 
-  notificationCapabilities: [
-    Capability.Play,
-    Capability.Pause,
-    Capability.Stop,
-    Capability.SkipToNext,
-    Capability.SkipToPrevious,
-  ],
+      notificationCapabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.Stop,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+      ],
 
-  // // An array of capabilities that will show up when the notification is in the compact form on Android
-  compactCapabilities: [
-    Capability.Play,
-    Capability.Pause,
-    Capability.Stop,
-    Capability.SkipToNext,
-  ],
+      // // An array of capabilities that will show up when the notification is in the compact form on Android
+      compactCapabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.Stop,
+        Capability.SkipToNext,
+      ],
 
-  // Icons for the notification on Android (if you don't like the default ones)
-  // playIcon: require('./play-icon.png'),
-  // pauseIcon: require('./pause-icon.png'),
-  // stopIcon: require('./stop-icon.png'),
-  // previousIcon: require('./previous-icon.png'),
-  // nextIcon: require('./next-icon.png'),
-  // icon: notificationIcon, // The notification icon
-}) => {
+      // Icons for the notification on Android (if you don't like the default ones)
+      // playIcon: require('./play-icon.png'),
+      // pauseIcon: require('./pause-icon.png'),
+      // stopIcon: require('./stop-icon.png'),
+      // previousIcon: require('./previous-icon.png'),
+      // nextIcon: require('./next-icon.png'),
+      // icon: notificationIcon, // The notification icon
+    }
+
+export const updateOptions = async(options = defaultUpdateOptions) => {
   return TrackPlayer.updateOptions(options)
 }
 

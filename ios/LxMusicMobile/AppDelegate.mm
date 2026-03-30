@@ -3,9 +3,11 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <React/RCTBridgeModule.h>
 #import <React/RCTBundleURLProvider.h>
+#import <React/RCTEventEmitter.h>
 #import <ReactNativeNavigation/ReactNativeNavigation.h>
 #import <Security/Security.h>
 #import <AVFoundation/AVFoundation.h>
+#import <JavaScriptCore/JavaScriptCore.h>
 #import <math.h>
 
 static NSData *LXBase64Decode(NSString *value) {
@@ -345,6 +347,27 @@ static NSString *LXSHA1(NSString *value) {
   return hash;
 }
 
+static NSString *LXJSONString(id value) {
+  if (value == nil || value == (id)kCFNull) return nil;
+  if ([value isKindOfClass:[NSString class]]) return value;
+  NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+  if (!data) return nil;
+  return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
+static NSString *LXJoinJSArguments(NSArray<JSValue *> *arguments) {
+  NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithCapacity:arguments.count];
+  for (JSValue *value in arguments) {
+    if (value.isUndefined || value.isNull) {
+      [parts addObject:@"null"];
+      continue;
+    }
+    NSString *text = value.toString;
+    [parts addObject:text ?: @"null"];
+  }
+  return [parts componentsJoinedByString:@" "];
+}
+
 static NSArray<NSString *> *LXCacheDirectories(void) {
   NSMutableArray<NSString *> *paths = [NSMutableArray array];
   NSString *cachePath = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
@@ -558,6 +581,251 @@ RCT_REMAP_METHOD(openDocument, openDocument:(NSDictionary *)options resolver:(RC
   result[@"data"] = targetPath;
   if (self.pickerResolve != nil) self.pickerResolve(result);
   [self resetPickerState];
+}
+
+@end
+
+@interface UserApiModule : RCTEventEmitter<RCTBridgeModule>
+@property (nonatomic, strong) JSContext *jsContext;
+@property (nonatomic, strong) dispatch_queue_t scriptQueue;
+@property (nonatomic, copy) NSString *scriptKey;
+@property (nonatomic, assign) BOOL initSent;
+@property (nonatomic, assign) BOOL hasListeners;
+@property (nonatomic, strong) NSDictionary *scriptInfo;
+@end
+
+@implementation UserApiModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return NO;
+}
+
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _scriptQueue = dispatch_queue_create("cn.toside.music.mobile.userapi", DISPATCH_QUEUE_SERIAL);
+  }
+  return self;
+}
+
+- (NSArray<NSString *> *)supportedEvents {
+  return @[ @"api-action" ];
+}
+
+- (void)startObserving {
+  self.hasListeners = YES;
+}
+
+- (void)stopObserving {
+  self.hasListeners = NO;
+}
+
+- (void)emitLogWithType:(NSString *)type message:(NSString *)message {
+  if (!self.hasListeners) return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self sendEventWithName:@"api-action" body:@{
+      @"action": @"log",
+      @"type": type ?: @"log",
+      @"log": message ?: @"",
+    }];
+  });
+}
+
+- (void)emitAction:(NSString *)action dataString:(NSString *)dataString errorMessage:(NSString *)errorMessage {
+  if (!self.hasListeners) return;
+  NSMutableDictionary *body = [NSMutableDictionary dictionaryWithObject:action forKey:@"action"];
+  if (dataString != nil) body[@"data"] = dataString;
+  if (errorMessage != nil) body[@"errorMessage"] = errorMessage;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self sendEventWithName:@"api-action" body:body];
+  });
+}
+
+- (NSString *)loadPreloadScript {
+  NSString *path = [[NSBundle mainBundle] pathForResource:@"user-api-preload" ofType:@"js"];
+  if (!path.length) return nil;
+  return [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+}
+
+- (void)emitInitFailed:(NSString *)message {
+  NSDictionary *data = @{
+    @"info": [NSNull null],
+    @"status": @NO,
+    @"errorMessage": message ?: @"Create JavaScript Env Failed",
+  };
+  [self emitAction:@"init" dataString:LXJSONString(data) errorMessage:(message ?: @"Create JavaScript Env Failed")];
+  [self emitLogWithType:@"error" message:(message ?: @"Create JavaScript Env Failed")];
+}
+
+- (void)destroyContext {
+  self.jsContext = nil;
+  self.scriptKey = nil;
+  self.initSent = NO;
+  self.scriptInfo = nil;
+}
+
+- (void)callJSAction:(NSString *)action data:(id)data {
+  if (self.jsContext == nil) return;
+  JSValue *nativeCall = self.jsContext[@"__lx_native__"];
+  if (nativeCall == nil || nativeCall.isUndefined) return;
+
+  NSMutableArray *arguments = [NSMutableArray arrayWithObjects:self.scriptKey ?: @"", action ?: @"", nil];
+  if (data != nil) {
+    NSString *jsonString = [data isKindOfClass:[NSString class]] ? data : LXJSONString(data);
+    if (jsonString != nil) [arguments addObject:jsonString];
+  }
+  [nativeCall callWithArguments:arguments];
+}
+
+- (BOOL)createJSEnv:(NSDictionary *)scriptInfo error:(NSString **)errorMessage {
+  self.scriptKey = NSUUID.UUID.UUIDString;
+  self.scriptInfo = scriptInfo;
+  self.initSent = NO;
+  JSContext *context = [[JSContext alloc] init];
+  self.jsContext = context;
+
+  __weak typeof(self) weakSelf = self;
+  __block NSString *lastException = nil;
+  context.exceptionHandler = ^(JSContext *ctx, JSValue *exception) {
+    ctx.exception = exception;
+    lastException = exception.toString ?: @"Unknown JavaScript exception";
+    [weakSelf emitLogWithType:@"error" message:[NSString stringWithFormat:@"Call script error: %@", lastException]];
+  };
+
+  context[@"globalThis"] = context.globalObject;
+  context[@"window"] = context.globalObject;
+  context[@"self"] = context.globalObject;
+  context[@"global"] = context.globalObject;
+
+  JSValue *console = [JSValue valueWithNewObjectInContext:context];
+  console[@"log"] = ^{ [weakSelf emitLogWithType:@"log" message:LXJoinJSArguments([JSContext currentArguments])]; };
+  console[@"info"] = ^{ [weakSelf emitLogWithType:@"info" message:LXJoinJSArguments([JSContext currentArguments])]; };
+  console[@"warn"] = ^{ [weakSelf emitLogWithType:@"warn" message:LXJoinJSArguments([JSContext currentArguments])]; };
+  console[@"error"] = ^{ [weakSelf emitLogWithType:@"error" message:LXJoinJSArguments([JSContext currentArguments])]; };
+  context[@"console"] = console;
+
+  context[@"__lx_native_call__"] = ^id(NSString *key, NSString *action, NSString *data) {
+    if (![weakSelf.scriptKey isEqualToString:key]) return nil;
+    if ([action isEqualToString:@"init"]) {
+      if (weakSelf.initSent) return nil;
+      weakSelf.initSent = YES;
+    }
+    [weakSelf emitAction:action dataString:data errorMessage:nil];
+    return nil;
+  };
+
+  context[@"__lx_native_call__utils_str2b64"] = ^NSString *(NSString *input) {
+    NSData *data = [input dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    return [data base64EncodedStringWithOptions:0];
+  };
+
+  context[@"__lx_native_call__utils_b642buf"] = ^NSString *(NSString *input) {
+    NSData *data = [[NSData alloc] initWithBase64EncodedString:input options:NSDataBase64DecodingIgnoreUnknownCharacters] ?: [NSData data];
+    NSMutableArray<NSNumber *> *result = [NSMutableArray arrayWithCapacity:data.length];
+    const unsigned char *bytes = (const unsigned char *)data.bytes;
+    for (NSUInteger index = 0; index < data.length; index++) {
+      [result addObject:@((NSInteger)bytes[index])];
+    }
+    return LXJSONString(result) ?: @"[]";
+  };
+
+  context[@"__lx_native_call__utils_str2md5"] = ^NSString *(NSString *input) {
+    NSString *decoded = [input stringByRemovingPercentEncoding] ?: input ?: @"";
+    NSData *data = [decoded dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    unsigned char digest[CC_MD5_DIGEST_LENGTH];
+    CC_MD5(data.bytes, (CC_LONG)data.length, digest);
+    NSMutableString *hash = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    for (NSInteger i = 0; i < CC_MD5_DIGEST_LENGTH; i++) {
+      [hash appendFormat:@"%02x", digest[i]];
+    }
+    return hash;
+  };
+
+  context[@"__lx_native_call__utils_aes_encrypt"] = ^NSString *(NSString *text, NSString *key, NSString *iv, NSString *mode) {
+    return LXAES(text ?: @"", key ?: @"", iv ?: @"", mode ?: @"", kCCEncrypt, nil) ?: @"";
+  };
+
+  context[@"__lx_native_call__utils_rsa_encrypt"] = ^NSString *(NSString *text, NSString *key, NSString *padding) {
+    return LXRSAEncrypt(text ?: @"", key ?: @"", padding ?: @"", nil) ?: @"";
+  };
+
+  context[@"__lx_native_call__set_timeout"] = ^id(NSNumber *identifier, NSNumber *timeout) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(timeout.doubleValue, 0) * NSEC_PER_MSEC)), weakSelf.scriptQueue, ^{
+      [weakSelf callJSAction:@"__set_timeout__" data:identifier ?: @0];
+    });
+    return nil;
+  };
+
+  NSString *preloadScript = [self loadPreloadScript];
+  if (!preloadScript.length) {
+    if (errorMessage != NULL) *errorMessage = @"create JavaScript Env failed";
+    return NO;
+  }
+
+  [context evaluateScript:preloadScript];
+  if (lastException.length) {
+    if (errorMessage != NULL) *errorMessage = lastException;
+    return NO;
+  }
+
+  JSValue *setup = context[@"lx_setup"];
+  [setup callWithArguments:@[
+    self.scriptKey ?: @"",
+    scriptInfo[@"id"] ?: @"",
+    scriptInfo[@"name"] ?: @"Unknown",
+    scriptInfo[@"description"] ?: @"",
+    scriptInfo[@"version"] ?: @"",
+    scriptInfo[@"author"] ?: @"",
+    scriptInfo[@"homepage"] ?: @"",
+    scriptInfo[@"script"] ?: @"",
+  ]];
+  if (lastException.length) {
+    if (errorMessage != NULL) *errorMessage = lastException;
+    return NO;
+  }
+  return YES;
+}
+
+RCT_EXPORT_METHOD(loadScript:(NSDictionary *)data) {
+  dispatch_async(self.scriptQueue, ^{
+    [self destroyContext];
+    NSString *errorMessage = nil;
+    if (![self createJSEnv:data error:&errorMessage]) {
+      [self emitInitFailed:errorMessage];
+      return;
+    }
+
+    __block NSString *lastException = nil;
+    self.jsContext.exceptionHandler = ^(JSContext *ctx, JSValue *exception) {
+      ctx.exception = exception;
+      lastException = exception.toString ?: @"Unknown JavaScript exception";
+      [self emitLogWithType:@"error" message:[NSString stringWithFormat:@"Call script error: %@", lastException]];
+    };
+
+    [self.jsContext evaluateScript:data[@"script"] ?: @""];
+    if (lastException.length) {
+      [self callJSAction:@"__run_error__" data:nil];
+      if (!self.initSent) {
+        self.initSent = YES;
+        [self emitInitFailed:lastException];
+      }
+    }
+  });
+}
+
+RCT_EXPORT_METHOD(sendAction:(NSString *)action info:(NSString *)info) {
+  dispatch_async(self.scriptQueue, ^{
+    if (self.jsContext == nil) return;
+    [self callJSAction:action data:info];
+  });
+}
+
+RCT_EXPORT_METHOD(destroy) {
+  dispatch_async(self.scriptQueue, ^{
+    [self destroyContext];
+  });
 }
 
 @end

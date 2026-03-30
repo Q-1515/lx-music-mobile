@@ -345,6 +345,47 @@ static NSString *LXSHA1(NSString *value) {
   return hash;
 }
 
+static NSArray<NSString *> *LXCacheDirectories(void) {
+  NSMutableArray<NSString *> *paths = [NSMutableArray array];
+  NSString *cachePath = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
+  if (cachePath.length) [paths addObject:cachePath];
+  NSString *tempPath = NSTemporaryDirectory();
+  if (tempPath.length && ![paths containsObject:tempPath]) [paths addObject:tempPath];
+  return paths;
+}
+
+static unsigned long long LXDirectorySize(NSString *directoryPath) {
+  if (!directoryPath.length) return 0;
+
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  BOOL isDirectory = NO;
+  if (![fileManager fileExistsAtPath:directoryPath isDirectory:&isDirectory] || !isDirectory) return 0;
+
+  unsigned long long total = 0;
+  NSDirectoryEnumerator *enumerator = [fileManager enumeratorAtPath:directoryPath];
+  for (NSString *itemPath in enumerator) {
+    NSString *fullPath = [directoryPath stringByAppendingPathComponent:itemPath];
+    NSDictionary *attributes = [fileManager attributesOfItemAtPath:fullPath error:nil];
+    if ([attributes[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
+    total += [attributes[NSFileSize] unsignedLongLongValue];
+  }
+  return total;
+}
+
+static BOOL LXClearDirectoryContents(NSString *directoryPath, NSError **error) {
+  if (!directoryPath.length) return YES;
+
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSArray<NSString *> *contents = [fileManager contentsOfDirectoryAtPath:directoryPath error:error];
+  if (contents == nil) return NO;
+
+  for (NSString *name in contents) {
+    NSString *fullPath = [directoryPath stringByAppendingPathComponent:name];
+    if (![fileManager removeItemAtPath:fullPath error:error]) return NO;
+  }
+  return YES;
+}
+
 static UIViewController *LXTopViewController(void) {
   UIWindow *window = nil;
   if (@available(iOS 13.0, *)) {
@@ -786,6 +827,43 @@ RCT_REMAP_METHOD(writeLyric, writeLyric:(NSString *)filePath lyric:(NSString *)l
     return;
   }
   resolve(nil);
+}
+
+@end
+
+@interface CacheModule : NSObject<RCTBridgeModule>
+@end
+
+@implementation CacheModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return NO;
+}
+
+RCT_REMAP_METHOD(getAppCacheSize, getAppCacheSizeWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    unsigned long long total = 0;
+    for (NSString *path in LXCacheDirectories()) {
+      total += LXDirectorySize(path);
+    }
+    resolve(@((double)total));
+  });
+}
+
+RCT_REMAP_METHOD(clearAppCache, clearAppCacheWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    NSError *error = nil;
+    for (NSString *path in LXCacheDirectories()) {
+      if (!LXClearDirectoryContents(path, &error)) {
+        reject(@"clear_cache_failed", error.localizedDescription ?: @"Failed to clear app cache", error);
+        return;
+      }
+    }
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    resolve(nil);
+  });
 }
 
 @end

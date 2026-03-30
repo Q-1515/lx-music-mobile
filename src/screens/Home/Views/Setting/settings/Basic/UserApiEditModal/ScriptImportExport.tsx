@@ -1,6 +1,6 @@
 import ChoosePath, { type ChoosePathType } from '@/components/common/ChoosePath'
 import { USER_API_SOURCE_FILE_EXT_RXP } from '@/config/constant'
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { handleImportLocalFile } from './action'
 
 export interface SelectInfo {
@@ -29,7 +29,18 @@ export default forwardRef<ScriptImportExportType, {}>((props, ref) => {
   const [visible, setVisible] = useState(false)
   const choosePathRef = useRef<ChoosePathType>(null)
   const selectInfoRef = useRef<SelectInfo>((initSelectInfo as SelectInfo))
+  const pendingShowRef = useRef(false)
   // console.log('render import export')
+
+  useEffect(() => {
+    if (!visible || !pendingShowRef.current || !choosePathRef.current) return
+    pendingShowRef.current = false
+    choosePathRef.current.show({
+      title: global.i18n.t('user_api_import_desc'),
+      dirOnly: false,
+      filter: USER_API_SOURCE_FILE_EXT_RXP,
+    })
+  }, [visible])
 
   useImperativeHandle(ref, () => ({
     import() {
@@ -43,14 +54,8 @@ export default forwardRef<ScriptImportExportType, {}>((props, ref) => {
           filter: USER_API_SOURCE_FILE_EXT_RXP,
         })
       } else {
+        pendingShowRef.current = true
         setVisible(true)
-        requestAnimationFrame(() => {
-          choosePathRef.current?.show({
-            title: global.i18n.t('user_api_import_desc'),
-            dirOnly: false,
-            filter: USER_API_SOURCE_FILE_EXT_RXP,
-          })
-        })
       }
     },
     // export(listInfo, index) {

@@ -155,6 +155,12 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
 }
 
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
+  if (force) {
+    const duration = await getTrackDuration()
+    state.prevDuration = duration
+    delayUpdateMusicInfo(musicInfo, lyric)
+    return
+  }
   if (!force && isPlay == state.isPlaying) {
     const duration = await getTrackDuration()
     if (state.prevDuration != duration) {

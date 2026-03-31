@@ -4,7 +4,7 @@ import { defaultUrl } from '@/config'
 import { NativeModules, Platform } from 'react-native'
 // import { action as playerAction } from '@/store/modules/player'
 import settingState from '@/store/setting/state'
-import { seekToTime } from './seek'
+import { getAccuratePosition, seekToTime } from './seek'
 
 
 const list: LX.Player.Track[] = []
@@ -150,6 +150,7 @@ const updateCurrentTrackMetadata = async(metadata: {
   album?: string
   artwork?: string
   duration?: number
+  elapsedTime?: number
 }) => {
   const currentTrackIndex = await TrackPlayer.getCurrentTrack().catch(() => null)
   if (currentTrackIndex != null && currentTrackIndex > -1) {
@@ -168,6 +169,7 @@ const ensureCurrentTrackMetadata = (metadata: {
   album?: string
   artwork?: string
   duration?: number
+  elapsedTime?: number
 }) => {
   void (async() => {
     const delays = Platform.OS == 'ios' ? [0, 160, 420, 900] : [0]
@@ -194,6 +196,7 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
     album: restoredTrack.album,
     artwork: typeof restoredTrack.artwork == 'string' ? restoredTrack.artwork : undefined,
     duration: restoredTrack.duration,
+    elapsedTime: position,
   })
 }
 
@@ -275,6 +278,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
     album: track.album,
     artwork: typeof track.artwork == 'string' ? track.artwork : undefined,
     duration: track.duration,
+    elapsedTime: time,
   })
 }
 let playPromise = Promise.resolve()
@@ -324,6 +328,7 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
     album: mInfo.album ?? undefined,
     artwork,
     duration: state.prevDuration || 0,
+    elapsedTime: await getAccuratePosition().catch(() => 0),
   }
   await updateCurrentTrackMetadata(metadata)
 }

@@ -16,7 +16,7 @@ import settingState from '@/store/setting/state'
 import { getBoardsList } from '@/core/leaderboard'
 import { COMPONENT_IDS } from '@/config/constant'
 import { handleCollect, handlePlay } from '../listAction'
-import boardState from '@/store/leaderboard/state'
+import boardState, { type BoardItem } from '@/store/leaderboard/state'
 
 
 const MAX_WIDTH = scaleSizeW(200)
@@ -37,6 +37,10 @@ export default () => {
       source,
       boardId: id,
     })
+  }
+  const resolveBoardId = (list: BoardItem[], boardId: string | null) => {
+    if (!list.length) return null
+    return list.some((item: { id: string }) => item.id == boardId) ? boardId : list[0].id
   }
   const onBoundChange: BoardsListProps['onBoundChange'] = (id) => {
     boundInfo.current.id = id
@@ -67,11 +71,12 @@ export default () => {
   const onSourceChange: HeaderBarProps['onSourceChange'] = (source) => {
     boundInfo.current.source = source
     void getBoardsList(source).then(list => {
-      const id = list[0].id
-      const name = list[0].name
+      const id = resolveBoardId(list, null)
+      if (!id) return
+      const bound = list.find(item => item.id == id)
       requestAnimationFrame(() => {
         boardsListRef.current?.setList(list, id)
-        headerBarRef.current?.setBound(source, id, name ?? 'Unknown')
+        headerBarRef.current?.setBound(source, id, bound?.name ?? 'Unknown')
         requestAnimationFrame(() => {
           handleBoundChange(source, id)
         })
@@ -104,13 +109,21 @@ export default () => {
     isUnmountedRef.current = false
     void getLeaderboardSetting().then(({ source, boardId }) => {
       boundInfo.current.source = source
-      boundInfo.current.id = boardId
       void getBoardsList(source).then(list => {
-        const bound = list.find(l => l.id == boardId)
-        boardsListRef.current?.setList(list, boardId)
-        headerBarRef.current?.setBound(source, boardId, bound?.name ?? 'Unknown')
+        const resolvedId = resolveBoardId(list, boardId)
+        if (!resolvedId) return
+        boundInfo.current.id = resolvedId
+        const bound = list.find(l => l.id == resolvedId)
+        boardsListRef.current?.setList(list, resolvedId)
+        headerBarRef.current?.setBound(source, resolvedId, bound?.name ?? 'Unknown')
+        if (resolvedId != boardId) {
+          void saveLeaderboardSetting({
+            source,
+            boardId: resolvedId,
+          })
+        }
+        musicListRef.current?.loadList(source, resolvedId)
       })
-      musicListRef.current?.loadList(source, boardId)
     })
 
     return () => {

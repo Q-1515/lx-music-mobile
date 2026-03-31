@@ -114,6 +114,8 @@
 	<array>
 		<string>icomoon.ttf</string>
 	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIBackgroundModes</key>

@@ -168,6 +168,12 @@ static NSError *LXError(NSString *code, NSString *message) {
   }];
 }
 
+static double LXClampDouble(double value, double minValue, double maxValue) {
+  if (value < minValue) return minValue;
+  if (value > maxValue) return maxValue;
+  return value;
+}
+
 static SecKeyRef LXCreateRSAKey(NSData *data, CFTypeRef keyClass, NSError **error) {
   NSData *normalizedData = CFEqual(keyClass, kSecAttrKeyClassPublic)
     ? LXStripPublicKeyHeader(data)
@@ -378,6 +384,11 @@ static NSArray<NSString *> *LXCacheDirectories(void) {
   return paths;
 }
 
+static BOOL LXShouldSkipManagedCacheEntry(NSString *relativePath) {
+  if (!relativePath.length) return NO;
+  return [relativePath isEqualToString:@"TrackPlayer"] || [relativePath hasPrefix:@"TrackPlayer/"];
+}
+
 static unsigned long long LXDirectorySize(NSString *directoryPath) {
   if (!directoryPath.length) return 0;
 
@@ -388,6 +399,10 @@ static unsigned long long LXDirectorySize(NSString *directoryPath) {
   unsigned long long total = 0;
   NSDirectoryEnumerator *enumerator = [fileManager enumeratorAtPath:directoryPath];
   for (NSString *itemPath in enumerator) {
+    if (LXShouldSkipManagedCacheEntry(itemPath)) {
+      [enumerator skipDescendants];
+      continue;
+    }
     NSString *fullPath = [directoryPath stringByAppendingPathComponent:itemPath];
     NSDictionary *attributes = [fileManager attributesOfItemAtPath:fullPath error:nil];
     if ([attributes[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
@@ -404,6 +419,7 @@ static BOOL LXClearDirectoryContents(NSString *directoryPath, NSError **error) {
   if (contents == nil) return NO;
 
   for (NSString *name in contents) {
+    if (LXShouldSkipManagedCacheEntry(name)) continue;
     NSString *fullPath = [directoryPath stringByAppendingPathComponent:name];
     if (![fileManager removeItemAtPath:fullPath error:error]) return NO;
   }
@@ -761,6 +777,277 @@ static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
 
   return types.count ? types.array : @[ @"public.data", @"public.item" ];
 }
+
+@interface FlacPlayerModule : RCTEventEmitter<RCTBridgeModule, AVAudioPlayerDelegate>
+@property (nonatomic, strong) AVAudioPlayer *player;
+@property (nonatomic, copy) NSString *currentPath;
+@property (nonatomic, copy) NSString *currentState;
+@property (nonatomic, assign) BOOL hasListeners;
+@end
+
+@implementation FlacPlayerModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return YES;
+}
+
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _currentState = @"idle";
+  }
+  return self;
+}
+
+- (NSArray<NSString *> *)supportedEvents {
+  return @[ @"flac-player-event" ];
+}
+
+- (void)startObserving {
+  self.hasListeners = YES;
+}
+
+- (void)stopObserving {
+  self.hasListeners = NO;
+}
+
+- (void)emitEventWithType:(NSString *)type body:(NSDictionary *)body {
+  if (!self.hasListeners) return;
+  NSMutableDictionary *payload = body != nil ? [body mutableCopy] : [NSMutableDictionary dictionary];
+  payload[@"type"] = type ?: @"state";
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self sendEventWithName:@"flac-player-event" body:payload];
+  });
+}
+
+- (void)emitState:(NSString *)state position:(NSNumber *)position duration:(NSNumber *)duration {
+  self.currentState = state ?: @"idle";
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"state"] = self.currentState;
+  payload[@"position"] = position ?: @(self.player != nil ? self.player.currentTime : 0);
+  payload[@"duration"] = duration ?: @(self.player != nil ? self.player.duration : 0);
+  [self emitEventWithType:@"state" body:payload];
+}
+
+- (void)emitErrorMessage:(NSString *)message {
+  [self emitEventWithType:@"error" body:@{
+    @"message": message ?: @"Unknown flac player error",
+    @"state": self.currentState ?: @"idle",
+    @"position": @(self.player != nil ? self.player.currentTime : 0),
+    @"duration": @(self.player != nil ? self.player.duration : 0),
+  }];
+}
+
+- (BOOL)prepareAudioSession:(NSError **)error {
+  AVAudioSession *session = [AVAudioSession sharedInstance];
+  if (@available(iOS 11.0, *)) {
+    if (![session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault policy:AVAudioSessionRouteSharingPolicyLongForm options:0 error:error]) return NO;
+  } else {
+    if (![session setCategory:AVAudioSessionCategoryPlayback error:error]) return NO;
+  }
+  if (![session setActive:YES error:error]) return NO;
+  return YES;
+}
+
+- (BOOL)loadPlayerWithPath:(NSString *)filePath error:(NSError **)error {
+  if (self.player != nil && [self.currentPath isEqualToString:filePath]) return YES;
+
+  if (self.player != nil) {
+    [self.player stop];
+    self.player.delegate = nil;
+    self.player = nil;
+  }
+
+  NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+  AVAudioPlayer *player = [[AVAudioPlayer alloc] initWithContentsOfURL:fileURL error:error];
+  if (player == nil) return NO;
+
+  player.delegate = self;
+  player.enableRate = YES;
+  [player prepareToPlay];
+  self.player = player;
+  self.currentPath = filePath;
+  return YES;
+}
+
+- (void)teardownPlayer {
+  if (self.player != nil) {
+    [self.player stop];
+    self.player.delegate = nil;
+    self.player = nil;
+  }
+  self.currentPath = nil;
+  self.currentState = @"idle";
+}
+
+RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNumber *)position volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (![filePath isKindOfClass:[NSString class]] || filePath.length == 0) {
+      NSError *error = LXError(@"flac_player_path", @"Missing flac player file path");
+      reject(@"flac_player_path", error.localizedDescription, error);
+      return;
+    }
+
+    [self emitState:@"loading" position:position duration:nil];
+
+    NSError *error = nil;
+    if (![self prepareAudioSession:&error] || ![self loadPlayerWithPath:filePath error:&error]) {
+      [self emitErrorMessage:error.localizedDescription ?: @"Failed to initialize flac player"];
+      reject(@"flac_player_load", error.localizedDescription ?: @"Failed to initialize flac player", error);
+      return;
+    }
+
+    self.player.volume = [volume floatValue];
+    self.player.rate = MAX([rate floatValue], 0.5f);
+    self.player.currentTime = LXClampDouble([position doubleValue], 0, self.player.duration);
+
+    if (![self.player play]) {
+      NSError *playError = LXError(@"flac_player_play", @"Failed to start flac playback");
+      [self emitErrorMessage:playError.localizedDescription];
+      reject(@"flac_player_play", playError.localizedDescription, playError);
+      return;
+    }
+
+    NSNumber *currentPosition = @(self.player.currentTime);
+    NSNumber *currentDuration = @(self.player.duration);
+    [self emitState:@"playing" position:currentPosition duration:currentDuration];
+    resolve(@{
+      @"position": currentPosition,
+      @"duration": currentDuration,
+    });
+  });
+}
+
+RCT_REMAP_METHOD(resume, resumeWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.player == nil) {
+      NSError *error = LXError(@"flac_player_resume", @"No flac player instance to resume");
+      reject(@"flac_player_resume", error.localizedDescription, error);
+      return;
+    }
+
+    NSError *sessionError = nil;
+    if (![self prepareAudioSession:&sessionError]) {
+      [self emitErrorMessage:sessionError.localizedDescription ?: @"Failed to activate audio session"];
+      reject(@"flac_player_resume", sessionError.localizedDescription ?: @"Failed to activate audio session", sessionError);
+      return;
+    }
+
+    if (![self.player play]) {
+      NSError *error = LXError(@"flac_player_resume", @"Failed to resume flac playback");
+      [self emitErrorMessage:error.localizedDescription];
+      reject(@"flac_player_resume", error.localizedDescription, error);
+      return;
+    }
+
+    [self emitState:@"playing" position:nil duration:nil];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(pause, pauseWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.player != nil) [self.player pause];
+    [self emitState:@"paused" position:nil duration:nil];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(stop, stopWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.player != nil) {
+      [self.player stop];
+      self.player.currentTime = 0;
+    }
+    [self emitState:@"stopped" position:@0 duration:nil];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(reset, resetWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self teardownPlayer];
+    [self emitState:@"idle" position:@0 duration:@0];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(seekTo, seekTo:(nonnull NSNumber *)position resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.player == nil) {
+      NSError *error = LXError(@"flac_player_seek", @"No flac player instance to seek");
+      reject(@"flac_player_seek", error.localizedDescription, error);
+      return;
+    }
+
+    self.player.currentTime = LXClampDouble([position doubleValue], 0, self.player.duration);
+    resolve(@(self.player.currentTime));
+  });
+}
+
+RCT_REMAP_METHOD(setVolume, setVolume:(nonnull NSNumber *)volume resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.player != nil) self.player.volume = [volume floatValue];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(setRate, setRate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.player != nil) {
+      self.player.enableRate = YES;
+      self.player.rate = MAX([rate floatValue], 0.5f);
+      if (self.player.isPlaying) [self.player play];
+    }
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(getPosition, getPositionWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    resolve(@(self.player != nil ? self.player.currentTime : 0));
+  });
+}
+
+RCT_REMAP_METHOD(getDuration, getDurationWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    resolve(@(self.player != nil ? self.player.duration : 0));
+  });
+}
+
+RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.player == nil) {
+      resolve(@"idle");
+      return;
+    }
+    if (self.player.isPlaying) {
+      resolve(@"playing");
+      return;
+    }
+    resolve(self.currentState ?: @"paused");
+  });
+}
+
+- (void)audioPlayerDidFinishPlaying:(AVAudioPlayer *)player successfully:(BOOL)flag {
+  if (player != self.player) return;
+  [self emitEventWithType:@"ended" body:@{
+    @"state": @"stopped",
+    @"position": @(player.duration),
+    @"duration": @(player.duration),
+    @"success": @(flag),
+  }];
+}
+
+- (void)audioPlayerDecodeErrorDidOccur:(AVAudioPlayer *)player error:(NSError *)error {
+  if (player != self.player) return;
+  self.currentState = @"paused";
+  [self emitErrorMessage:error.localizedDescription ?: @"Flac decode failed"];
+}
+
+@end
 
 @interface FilePickerModule : NSObject<RCTBridgeModule, UIDocumentPickerDelegate>
 @property (nonatomic, copy) RCTPromiseResolveBlock pickerResolve;

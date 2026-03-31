@@ -9,6 +9,7 @@ import { isTempId, isEmpty } from './utils'
 import { exitApp } from '@/core/common'
 import { getCurrentTrackId } from './playList'
 import { pause, play, playNext, playPrev } from '@/core/player/player'
+import { getNativeFlacTrackId, isNativeFlacActive, onNativeFlacPlayerEvent } from './nativeFlac'
 
 let isInitialized = false
 
@@ -69,6 +70,7 @@ const registerPlaybackService = async() => {
   // })
 
   TrackPlayer.addEventListener(TPEvent.PlaybackError, async(err: any) => {
+    if (Platform.OS == 'ios' && isNativeFlacActive()) return
     console.log('playback-error', err)
     global.app_event.error()
     global.app_event.playerError()
@@ -79,6 +81,7 @@ const registerPlaybackService = async() => {
   })
 
   TrackPlayer.addEventListener(TPEvent.PlaybackState, async info => {
+    if (Platform.OS == 'ios' && isNativeFlacActive()) return
     if (global.lx.gettingUrlId || isTempId()) return
     // let currentIsPlaying = false
 
@@ -116,6 +119,7 @@ const registerPlaybackService = async() => {
     // void updateMetaData(global.lx.store_playMusicInfo.musicInfo, currentIsPlaying)
   })
   TrackPlayer.addEventListener(TPEvent.PlaybackTrackChanged, async info => {
+    if (Platform.OS == 'ios' && isNativeFlacActive()) return
     // console.log('PlaybackTrackChanged====>', info)
     global.lx.playerTrackId = await getCurrentTrackId()
     if (info.track == null) return
@@ -182,8 +186,9 @@ const registerPlaybackService = async() => {
   //   // }
   //   // store.dispatch(playerAction.playNext())
   })
-  const playbackQueueEndedEvent = (TPEvent as any).PlaybackQueueEnded ?? 'playback-queue-ended'
+  const playbackQueueEndedEvent = ((TPEvent as unknown as { PlaybackQueueEnded?: TPEvent }).PlaybackQueueEnded ?? 'playback-queue-ended') as TPEvent
   TrackPlayer.addEventListener(playbackQueueEndedEvent, async() => {
+    if (Platform.OS == 'ios' && isNativeFlacActive()) return
     if (Platform.OS != 'ios') return
     if (global.lx.gettingUrlId || isTempId()) return
     global.lx.playerTrackId = ''
@@ -220,6 +225,39 @@ const registerPlaybackService = async() => {
   //   console.log('playback-destroy')
   //   store.dispatch(playerAction.destroy())
   // })
+  onNativeFlacPlayerEvent((event) => {
+    switch (event.type) {
+      case 'state':
+        if (event.state == 'loading') {
+          global.app_event.playerLoadstart()
+          break
+        }
+        if (event.state == 'playing') {
+          global.lx.playerTrackId = getNativeFlacTrackId()
+          global.app_event.playerPlaying()
+          global.app_event.play()
+          break
+        }
+        if (event.state == 'paused' || event.state == 'stopped' || event.state == 'idle') {
+          if (event.state != 'paused') global.lx.playerTrackId = ''
+          global.app_event.playerPause()
+          global.app_event.pause()
+        }
+        break
+      case 'ended':
+        global.lx.playerTrackId = ''
+        global.app_event.playerPause()
+        global.app_event.pause()
+        global.app_event.playerEnded()
+        global.app_event.playerEmptied()
+        break
+      case 'error':
+        console.log('native flac playback-error', event.message)
+        global.app_event.error()
+        global.app_event.playerError()
+        break
+    }
+  })
   isInitialized = true
 }
 

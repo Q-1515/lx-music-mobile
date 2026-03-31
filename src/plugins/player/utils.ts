@@ -1,12 +1,23 @@
 import TrackPlayer, { Capability, Event, RepeatMode, State } from 'react-native-track-player'
 import BackgroundTimer from 'react-native-background-timer'
-import { playMusic as handlePlayMusic } from './playList'
+import { clearTracks, playMusic as handlePlayMusic } from './playList'
 import { existsFile, moveFile, privateStorageDirectoryPath, temporaryDirectoryPath } from '@/utils/fs'
 import { toast } from '@/utils/tools'
 import { NativeModules, Platform } from 'react-native'
-import { clearTracks } from './playList'
 import { getAccuratePosition, seekToTime } from './seek'
 import { clearNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
+import {
+  getNativeFlacDuration,
+  getNativeFlacPosition,
+  isNativeFlacActive,
+  pauseNativeFlacPlayback,
+  resetNativeFlacPlayback,
+  resumeNativeFlacPlayback,
+  seekNativeFlacPlayback,
+  setNativeFlacRate,
+  setNativeFlacVolume,
+  stopNativeFlacPlayback,
+} from './nativeFlac'
 // import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
 
 
@@ -31,10 +42,14 @@ const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
 const emptyIdRxp = /\/\/default$/
 const tempIdRxp = /\/\/default$|\/\/default\/\/restorePlay$/
 export const isEmpty = (trackId = global.lx.playerTrackId) => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return false
   // console.log(trackId)
   return !trackId || emptyIdRxp.test(trackId)
 }
-export const isTempId = (trackId = global.lx.playerTrackId) => !trackId || tempIdRxp.test(trackId)
+export const isTempId = (trackId = global.lx.playerTrackId) => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return false
+  return !trackId || tempIdRxp.test(trackId)
+}
 
 // export const replacePlayTrack = async(newTrack, oldTrack) => {
 //   console.log('replaceTrack')
@@ -174,27 +189,48 @@ export const setResource = (musicInfo: LX.Player.PlayMusic, url: string, duratio
   playMusic(musicInfo, url, duration ?? 0)
 }
 
-export const setPlay = async() => TrackPlayer.play()
+export const setPlay = async() => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return resumeNativeFlacPlayback()
+  return TrackPlayer.play()
+}
 export const getPosition = async() => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return getNativeFlacPosition()
   return getAccuratePosition()
 }
 export const getDuration = async() => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return getNativeFlacDuration()
   if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getDuration == 'function') {
     return NativeTrackPlayerModule.getDuration()
   }
   return TrackPlayer.getDuration()
 }
 export const setStop = async() => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) {
+    global.lx.playerTrackId = ''
+    return stopNativeFlacPlayback()
+  }
   await TrackPlayer.stop()
   if (Platform.OS != 'ios' && !isEmpty()) await TrackPlayer.skipToNext()
 }
 export const setLoop = async(loop: boolean) => TrackPlayer.setRepeatMode(loop ? RepeatMode.Off : RepeatMode.Track)
 
-export const setPause = async() => TrackPlayer.pause()
+export const setPause = async() => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return pauseNativeFlacPlayback()
+  return TrackPlayer.pause()
+}
 // export const skipToNext = () => TrackPlayer.skipToNext()
-export const setCurrentTime = async(time: number) => seekToTime(time)
-export const setVolume = async(num: number) => TrackPlayer.setVolume(num)
-export const setPlaybackRate = async(num: number) => TrackPlayer.setRate(num)
+export const setCurrentTime = async(time: number) => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return seekNativeFlacPlayback(time)
+  return seekToTime(time)
+}
+export const setVolume = async(num: number) => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return setNativeFlacVolume(num)
+  return TrackPlayer.setVolume(num)
+}
+export const setPlaybackRate = async(num: number) => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return setNativeFlacRate(num)
+  return TrackPlayer.setRate(num)
+}
 export const updateNowPlayingTitles = async(duration: number, title: string, artist: string, album: string) => {
   console.log('set playing titles', duration, title, artist, album)
   if (Platform.OS == 'ios') return Promise.resolve()
@@ -219,9 +255,9 @@ export const clearCache = async() => {
   return TrackPlayer.clearCache()
 }
 export const migratePlayerCache = async() => {
-  const newCachePath = privateStorageDirectoryPath + '/TrackPlayer'
+  const newCachePath = temporaryDirectoryPath + '/TrackPlayer'
   if (await existsFile(newCachePath)) return
-  const oldCachePath = temporaryDirectoryPath + '/TrackPlayer'
+  const oldCachePath = privateStorageDirectoryPath + '/TrackPlayer'
   if (!await existsFile(oldCachePath)) return
   let timeout: number | null = BackgroundTimer.setTimeout(() => {
     timeout = null
@@ -235,6 +271,7 @@ export const migratePlayerCache = async() => {
 export const destroy = async() => {
   if (global.lx.playerStatus.isIniting || !global.lx.playerStatus.isInitialized) return
   try {
+    if (Platform.OS == 'ios') await resetNativeFlacPlayback().catch(() => {})
     await TrackPlayer.destroy()
   } finally {
     if (Platform.OS == 'ios') await clearNowPlayingInfo().catch(() => {})

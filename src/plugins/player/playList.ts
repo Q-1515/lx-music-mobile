@@ -6,6 +6,16 @@ import { NativeModules, Platform } from 'react-native'
 import settingState from '@/store/setting/state'
 import { getAccuratePosition, seekToTime } from './seek'
 import { updateNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
+import {
+  getNativeFlacDuration,
+  getNativeFlacPosition,
+  getNativeFlacState,
+  getNativeFlacTrackId,
+  isNativeFlacActive,
+  resetNativeFlacPlayback,
+  shouldUseNativeFlacPlayer,
+  startNativeFlacPlayback,
+} from './nativeFlac'
 
 
 const list: LX.Player.Track[] = []
@@ -24,7 +34,7 @@ const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
 }
 
 const formatNowPlayingTitleLine = (title?: string, artist?: string) => {
-  const safeTitle = title || 'Unknow'
+  const safeTitle = title ?? 'Unknow'
   return artist ? `${safeTitle} - ${artist}` : safeTitle
 }
 
@@ -144,10 +154,12 @@ export const getCurrentTrack = async() => {
 }
 
 const applyCurrentVolume = async() => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return
   await TrackPlayer.setVolume(settingState.setting['player.volume'])
 }
 
 const getTrackDuration = async() => {
+  if (Platform.OS == 'ios' && isNativeFlacActive()) return getNativeFlacDuration()
   if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getDuration == 'function') {
     return NativeTrackPlayerModule.getDuration()
   }
@@ -260,7 +272,30 @@ export const initTrackInfo = async(musicInfo: LX.Player.PlayMusic, mInfo: LX.Pla
 
 
 const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time: number) => {
-// console.log(tracks, time)
+  if (Platform.OS == 'ios' && shouldUseNativeFlacPlayer(musicInfo, url)) {
+    await TrackPlayer.reset().catch(async() => {
+      await TrackPlayer.stop().catch(() => {})
+    })
+    clearTracks()
+    const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time)
+    global.lx.playerTrackId = getNativeFlacTrackId()
+    ensureCurrentTrackMetadata({
+      title: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.name : musicInfo.name) ?? 'Unknow',
+      artist: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.singer : musicInfo.singer) ?? 'Unknow',
+      album: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.meta.albumName : musicInfo.meta.albumName) ?? undefined,
+      artwork: 'progress' in musicInfo
+        ? (typeof musicInfo.metadata.musicInfo.meta.picUrl == 'string' ? musicInfo.metadata.musicInfo.meta.picUrl : undefined)
+        : (typeof musicInfo.meta.picUrl == 'string' ? musicInfo.meta.picUrl : undefined),
+      duration: playbackInfo.duration,
+      elapsedTime: playbackInfo.position,
+      playbackRate: settingState.setting['player.playbackRate'],
+    })
+    return
+  }
+  if (Platform.OS == 'ios' && isNativeFlacActive()) {
+    await resetNativeFlacPlayback().catch(() => {})
+  }
+  // console.log(tracks, time)
   const tracks = buildTracks(musicInfo, url)
   const track = tracks[0]
   let isPlaying = false
@@ -316,7 +351,13 @@ export const playMusic = (musicInfo: LX.Player.PlayMusic, url: string, time: num
   const id = actionId = Math.random()
   void playPromise.finally(() => {
     if (id != actionId) return
-    playPromise = handlePlayMusic(musicInfo, url, time)
+    playPromise = handlePlayMusic(musicInfo, url, time).catch((err: Error & { lxHandled?: boolean }) => {
+      console.log(err)
+      if (!err?.lxHandled) {
+        global.app_event.error()
+        global.app_event.playerError()
+      }
+    })
   })
 }
 
@@ -338,7 +379,9 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
   //   duration = global.playInfo.duration || 0
   // }
   // console.log('+++++updateMetaInfo+++++', mInfo.name)
-  state.isPlaying = await TrackPlayer.getState() == State.Playing
+  state.isPlaying = Platform.OS == 'ios' && isNativeFlacActive()
+    ? await getNativeFlacState().then((state) => state == 'playing')
+    : await TrackPlayer.getState() == State.Playing
   let artwork = isShowNotificationImage ? mInfo.pic ?? prevArtwork : undefined
   if (mInfo.pic) prevArtwork = mInfo.pic
   let name: string
@@ -363,7 +406,9 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
     album,
     artwork,
     duration: state.prevDuration || 0,
-    elapsedTime: await getAccuratePosition().catch(() => 0),
+    elapsedTime: isNativeFlacActive()
+      ? await getNativeFlacPosition().catch(() => 0)
+      : await getAccuratePosition().catch(() => 0),
     playbackRate: state.isPlaying ? settingState.setting['player.playbackRate'] : 0,
   }
   await updateCurrentTrackMetadata(metadata)

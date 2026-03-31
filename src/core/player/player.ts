@@ -1,4 +1,4 @@
-import { isInitialized, initial as playerInitial, isEmpty, setPause, setPlay, setResource, setStop, initTrackInfo } from '@/plugins/player'
+import { isInitialized, initial as playerInitial, isEmpty, setPause, setPlay, setResource, setStop, initTrackInfo, getPosition } from '@/plugins/player'
 import {
   setStatusText,
 } from '@/core/player/playStatus'
@@ -137,9 +137,11 @@ export const setMusicUrl = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   if (!diffCurrentMusicInfo(musicInfo)) return
   if (cancelDelayRetry) cancelDelayRetry()
   global.lx.gettingUrlId = createGettingUrlId(musicInfo)
-  void getMusicPlayUrl(musicInfo, isRefresh).then((url) => {
+  const currentTimePromise = getPosition().catch(() => playerState.progress.nowPlayTime)
+  void getMusicPlayUrl(musicInfo, isRefresh).then(async(url) => {
     if (!url) return
-    setResource(musicInfo, url, playerState.progress.nowPlayTime)
+    const currentTime = await currentTimePromise
+    setResource(musicInfo, url, currentTime)
   }).catch((err: any) => {
     console.log(err)
     setStatusText(err.message as string)

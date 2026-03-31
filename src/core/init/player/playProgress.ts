@@ -1,5 +1,6 @@
 import { updateListMusics } from '@/core/list'
 import { setMaxplayTime, setNowPlayTime } from '@/core/player/progress'
+import { getTimelineDuration } from '@/core/player/timeline'
 import { setCurrentTime, getDuration, getPosition } from '@/plugins/player/utils'
 import { formatPlayTime2 } from '@/utils/common'
 import { savePlayInfo } from '@/utils/data'
@@ -39,7 +40,9 @@ export default () => {
     })
   }
   const getMaxTime = async() => {
-    setMaxplayTime(await getDuration())
+    const duration = await getDuration()
+    const timelineDuration = getTimelineDuration(playerState.playMusicInfo.musicInfo, duration)
+    setMaxplayTime(timelineDuration)
 
     if (playerState.playMusicInfo.musicInfo && 'source' in playerState.playMusicInfo.musicInfo && !playerState.playMusicInfo.musicInfo.interval) {
       // console.log(formatPlayTime2(playProgress.maxPlayTime))
@@ -80,7 +83,7 @@ export default () => {
       global.app_event.seekLyric(targetPosition > 0 ? targetPosition : time)
     })
 
-    if (maxTime != null) setMaxplayTime(maxTime)
+    if (maxTime != null) setMaxplayTime(getTimelineDuration(playerState.playMusicInfo.musicInfo, maxTime))
 
     // if (!isPlay) audio.play()
   }

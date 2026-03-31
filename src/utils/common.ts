@@ -64,6 +64,20 @@ export const formatPlayTime = (time: number) => {
   return m == 0 && s == 0 ? '--/--' : numFix(m) + ':' + numFix(s)
 }
 
+export const parsePlayTime = (time?: string | null) => {
+  if (!time) return 0
+  const parts = time.trim().split(':')
+  if (!parts.length || parts.some(part => !/^\d+$/.test(part))) return 0
+
+  let total = 0
+  let unit = 1
+  while (parts.length) {
+    total += parseInt(parts.pop()!, 10) * unit
+    unit *= 60
+  }
+  return total
+}
+
 export const formatPlayTime2 = (time: number) => {
   let m = Math.trunc(time / 60)
   let s = Math.trunc(time % 60)

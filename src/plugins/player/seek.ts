@@ -19,16 +19,26 @@ export const seekToTime = async(targetTime: number) => {
   if (Platform.OS != 'ios') return targetTime
 
   let position = targetTime
+  let stableCount = 0
   for (const [delay, tolerance] of [
     [140, 1.2],
-    [260, 0.8],
-    [420, 0.45],
+    [200, 0.75],
+    [280, 0.4],
+    [360, 0.22],
+    [520, 0.12],
   ] as const) {
     await wait(delay)
     const currentPosition = await getAccuratePosition().catch(() => position)
     if (currentPosition > 0) position = currentPosition
-    if (Math.abs(position - targetTime) <= tolerance) break
+    if (Math.abs(position - targetTime) <= tolerance) {
+      stableCount++
+      if (stableCount > 1 || tolerance <= 0.22) break
+      continue
+    }
+    stableCount = 0
     await TrackPlayer.seekTo(targetTime)
   }
+  const finalPosition = await getAccuratePosition().catch(() => position)
+  if (finalPosition > 0) position = finalPosition
   return position
 }

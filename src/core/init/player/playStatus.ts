@@ -46,11 +46,10 @@ export default () => {
   //   // buttons.empty = true
   //   setButtons()
   // }
-  // const handleSetPlayInfo = () => {
-  //   void updateCollectStatus().then(isExist => {
-  //     if (isExist) setButtons()
-  //   })
-  // }
+  const handleSetPlayInfo = () => {
+    if (!playerState.playMusicInfo.musicInfo) return
+    void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric, true)
+  }
   // const handleSetTaskbarThumbnailClip = (clip) => {
   //   setTaskbarThumbnailClip(clip)
   // }
@@ -67,7 +66,7 @@ export default () => {
   global.app_event.on('play', handlePlay)
   global.app_event.on('pause', handlePause)
   global.app_event.on('stop', handlePause)
-  // global.app_event.on('musicToggled', handleSetPlayInfo)
+  global.app_event.on('musicToggled', handleSetPlayInfo)
   // window.app_event.on(eventTaskbarNames.setTaskbarThumbnailClip, handleSetTaskbarThumbnailClip)
   // window.app_event.on('myListMusicUpdate', throttleListChange)
 

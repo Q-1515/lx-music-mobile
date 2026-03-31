@@ -12,6 +12,7 @@ import playerState from '@/store/player/state'
 import { scrollTo } from '@/utils/scroll'
 import PlayLine, { type PlayLineType } from '../components/PlayLine'
 import KaraokeLine from '../components/KaraokeLine'
+import { normalizeExtendedLyricText } from '../components/lyricText'
 // import { screenkeepAwake } from '@/utils/nativeModules/utils'
 // import { log } from '@/utils/log'
 // import { toast } from '@/utils/tools'
@@ -76,11 +77,13 @@ const LrcLine = memo(({ line, lineNum, activeLine, activeWordIndex, activeWordPr
       }
       {
         line.extendedLyrics.map((lrc, index) => {
+          const text = normalizeExtendedLyricText(lrc)
+          if (!text) return null
           return (<AnimatedColorText style={{
             ...styles.lineTranslationText,
             textAlign,
             lineHeight: lineHeight * 0.8,
-          }} textBreakStrategy="simple" key={index} color={colors[1]} opacity={colors[2]} size={size * 0.8}>{lrc}</AnimatedColorText>)
+          }} textBreakStrategy="simple" key={index} color={colors[1]} opacity={colors[2]} size={size * 0.8}>{text}</AnimatedColorText>)
         })
       }
     </View>

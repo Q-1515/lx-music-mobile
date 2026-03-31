@@ -63,7 +63,7 @@ const LrcLine = memo(({ line, lineNum, activeLine, activeWordIndex, onLayout }: 
               }} size={size}>
                 {
                   line.words.map((word, index) => (
-                    <Text key={index} size={size} color={index <= activeWordIndex ? colors[0] : colors[1]}>{word.text}</Text>
+                    <Text key={index} size={size} color={index <= activeWordIndex ? colors[0] : theme['c-350']}>{word.text}</Text>
                   ))
                 }
               </Text>

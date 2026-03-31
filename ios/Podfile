@@ -25,6 +25,62 @@ if linkage != nil
   use_frameworks! :linkage => linkage.to_sym
 end
 
+def lx_patch_swift_audio_seek(installer)
+  wrapper_path = Dir.glob(File.join(installer.sandbox.root.to_s, '**', 'AVPlayerWrapper.swift'))
+    .find { |file| file.include?('SwiftAudioEx') || file.include?('SwiftAudio') }
+
+  unless wrapper_path
+    Pod::UI.puts 'Skip SwiftAudio seek patch: AVPlayerWrapper.swift not found'.yellow
+    return
+  end
+
+  replacement = <<~'SWIFT'
+    func seek(to seconds: TimeInterval) {
+        // if the player is loading then we need to defer seeking until it's ready.
+        if (avPlayer.currentItem == nil) {
+            timeToSeekToAfterLoading = seconds
+        } else {
+            let time = CMTimeMakeWithSeconds(seconds, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+            let performSeek = { [weak self] (completion: @escaping (Bool) -> Void) in
+                guard let self = self else {
+                    completion(false)
+                    return
+                }
+                self.currentItem?.cancelPendingSeeks()
+                self.avPlayer.seek(to: time, toleranceBefore: CMTime.zero, toleranceAfter: CMTime.zero, completionHandler: completion)
+            }
+
+            performSeek { [weak self] finished in
+                guard let self = self else { return }
+                let currentTime = self.avPlayer.currentTime().seconds
+                if finished && !currentTime.isNaN && abs(currentTime - seconds) > 0.2 {
+                    performSeek { [weak self] retryFinished in
+                        guard let self = self else { return }
+                        self.delegate?.AVWrapper(seekTo: Double(seconds), didFinish: retryFinished)
+                    }
+                    return
+                }
+                self.delegate?.AVWrapper(seekTo: Double(seconds), didFinish: finished)
+            }
+        }
+    }
+
+    func seek(by seconds: TimeInterval) {
+  SWIFT
+
+  source = File.binread(wrapper_path)
+  return if source.include?(replacement.strip)
+
+  patched = source.gsub(/func seek\(to seconds: TimeInterval\) \{.*?func seek\(by seconds: TimeInterval\) \{/m, replacement)
+  if patched == source
+    Pod::UI.puts "Skip SwiftAudio seek patch: pattern not found in #{wrapper_path}".yellow
+    return
+  end
+
+  File.binwrite(wrapper_path, patched)
+  Pod::UI.puts "Patched SwiftAudio seek: #{wrapper_path}".green
+end
+
 target 'LxMusicMobile' do
   config = use_native_modules!
 
@@ -51,6 +107,8 @@ target 'LxMusicMobile' do
       config[:reactNativePath],
       :mac_catalyst_enabled => false
     )
+
+    lx_patch_swift_audio_seek(installer)
 
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |build_configuration|

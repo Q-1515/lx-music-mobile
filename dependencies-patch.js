@@ -190,6 +190,87 @@ const patchFile = async({ filePath, changes }) => {
   if (normalizedFile != originalFile) await fs.promises.writeFile(resolvedPath, normalizedFile.replace(/\n/g, eol))
 }
 
+const walkFiles = async(dirPath, visitor) => {
+  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry.name)
+    if (entry.isDirectory()) await walkFiles(entryPath, visitor)
+    else await visitor(entryPath)
+  }
+}
+
+const findFile = async(dirPath, fileName) => {
+  let matchedPath = null
+  await walkFiles(dirPath, async(filePath) => {
+    if (matchedPath || path.basename(filePath) != fileName) return
+    matchedPath = filePath
+  })
+  return matchedPath
+}
+
+const patchFileByRegex = async({ filePath, pattern, replacement }) => {
+  const resolvedPath = path.join(rootPath, filePath)
+  console.log(`Patching ${filePath}`)
+
+  const file = await fs.promises.readFile(resolvedPath, 'utf8')
+  const eol = file.includes('\r\n') ? '\r\n' : '\n'
+  const normalizedFile = file.replace(/\r\n/g, '\n')
+  if (normalizedFile.includes(replacement.trim())) return
+  const nextFile = normalizedFile.replace(pattern, replacement)
+
+  if (nextFile == normalizedFile) throw new Error('Patch pattern not found')
+  if (nextFile != normalizedFile) await fs.promises.writeFile(resolvedPath, nextFile.replace(/\n/g, eol))
+}
+
+const patchSwiftAudioSeek = async() => {
+  const baseDir = path.join(rootPath, 'node_modules/react-native-track-player/ios/RNTrackPlayer')
+  if (!fs.existsSync(baseDir)) {
+    console.log('Skip SwiftAudio seek patch: react-native-track-player source not found')
+    return
+  }
+  const wrapperPath = await findFile(baseDir, 'AVPlayerWrapper.swift')
+  if (!wrapperPath) {
+    console.log('Skip SwiftAudio seek patch: AVPlayerWrapper.swift not found')
+    return
+  }
+
+  const relativePath = path.relative(rootPath, wrapperPath)
+  await patchFileByRegex({
+    filePath: relativePath,
+    pattern: /func seek\(to seconds: TimeInterval\) \{[\s\S]*?func seek\(by seconds: TimeInterval\) \{/,
+    replacement: `func seek(to seconds: TimeInterval) {
+        // if the player is loading then we need to defer seeking until it's ready.
+        if (avPlayer.currentItem == nil) {
+            timeToSeekToAfterLoading = seconds
+        } else {
+            let time = CMTimeMakeWithSeconds(seconds, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+            let performSeek = { [weak self] (completion: @escaping (Bool) -> Void) in
+                guard let self = self else {
+                    completion(false)
+                    return
+                }
+                self.currentItem?.cancelPendingSeeks()
+                self.avPlayer.seek(to: time, toleranceBefore: CMTime.zero, toleranceAfter: CMTime.zero, completionHandler: completion)
+            }
+
+            performSeek { [weak self] finished in
+                guard let self = self else { return }
+                let currentTime = self.avPlayer.currentTime().seconds
+                if finished && !currentTime.isNaN && abs(currentTime - seconds) > 0.2 {
+                    performSeek { [weak self] retryFinished in
+                        guard let self = self else { return }
+                        self.delegate?.AVWrapper(seekTo: Double(seconds), didFinish: retryFinished)
+                    }
+                    return
+                }
+                self.delegate?.AVWrapper(seekTo: Double(seconds), didFinish: finished)
+            }
+        }
+    }
+    func seek(by seconds: TimeInterval) {`,
+  })
+}
+
 ;(async() => {
   for (const target of patchTargets) {
     try {
@@ -197,6 +278,11 @@ const patchFile = async({ filePath, changes }) => {
     } catch (err) {
       console.error(`Patch ${target.filePath} failed: ${err.message}`)
     }
+  }
+  try {
+    await patchSwiftAudioSeek()
+  } catch (err) {
+    console.error(`Patch SwiftAudio seek failed: ${err.message}`)
   }
   console.log('\nDependencies patch finished.\n')
 })()

@@ -411,44 +411,64 @@ static BOOL LXClearDirectoryContents(NSString *directoryPath, NSError **error) {
 }
 
 static NSURLSessionDataTask *LXNowPlayingArtworkTask = nil;
+static NSMutableDictionary *LXNowPlayingInfoCache = nil;
+static NSString *LXNowPlayingArtworkPath = nil;
+static NSUInteger LXNowPlayingArtworkRequestId = 0;
+static MPNowPlayingPlaybackState LXNowPlayingState = MPNowPlayingPlaybackStateStopped;
+static NSString * const LXTrackPlayerLifecycleNotificationName = @"LXTrackPlayerLifecycle";
+static id LXTrackPlayerLifecycleObserver = nil;
 
-static void LXSetNowPlayingInfo(NSDictionary *metadata) {
-  NSMutableDictionary *info = [[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo mutableCopy] ?: [NSMutableDictionary dictionary];
+static NSMutableDictionary *LXNowPlayingMutableInfo(void) {
+  if (LXNowPlayingInfoCache == nil) LXNowPlayingInfoCache = [NSMutableDictionary dictionary];
+  return LXNowPlayingInfoCache;
+}
 
-  NSString *title = [metadata[@"title"] isKindOfClass:[NSString class]] ? metadata[@"title"] : nil;
-  NSString *artist = [metadata[@"artist"] isKindOfClass:[NSString class]] ? metadata[@"artist"] : nil;
-  NSString *album = [metadata[@"album"] isKindOfClass:[NSString class]] ? metadata[@"album"] : nil;
-  NSNumber *duration = [metadata[@"duration"] isKindOfClass:[NSNumber class]] ? metadata[@"duration"] : nil;
-  NSNumber *elapsedTime = [metadata[@"elapsedTime"] isKindOfClass:[NSNumber class]] ? metadata[@"elapsedTime"] : nil;
-  NSNumber *playbackRate = [metadata[@"playbackRate"] isKindOfClass:[NSNumber class]] ? metadata[@"playbackRate"] : nil;
+static void LXApplyNowPlayingInfo(void) {
+  MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
+  center.nowPlayingInfo = LXNowPlayingInfoCache.count ? [LXNowPlayingInfoCache copy] : nil;
+  if (@available(iOS 13.0, *)) {
+    center.playbackState = LXNowPlayingState;
+  }
+}
 
-  if (title != nil) info[MPMediaItemPropertyTitle] = title;
-  if (artist != nil) info[MPMediaItemPropertyArtist] = artist;
-  if (album != nil) info[MPMediaItemPropertyAlbumTitle] = album;
-  if (duration != nil) info[MPMediaItemPropertyPlaybackDuration] = duration;
-  if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
-  info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: @1;
-
-  [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = info;
-
-  NSString *artworkPath = [metadata[@"artwork"] isKindOfClass:[NSString class]] ? metadata[@"artwork"] : nil;
-  if (!artworkPath.length) return;
-
+static void LXCancelNowPlayingArtworkTask(void) {
   if (LXNowPlayingArtworkTask != nil) {
     [LXNowPlayingArtworkTask cancel];
     LXNowPlayingArtworkTask = nil;
   }
+}
 
+static void LXApplyNowPlayingArtwork(UIImage *image, NSUInteger requestId) {
+  if (image == nil) return;
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (requestId != LXNowPlayingArtworkRequestId) return;
+    NSMutableDictionary *info = LXNowPlayingMutableInfo();
+    MPMediaItemArtwork *artwork = [[MPMediaItemArtwork alloc] initWithBoundsSize:image.size requestHandler:^UIImage * _Nonnull(CGSize size) {
+      return image;
+    }];
+    info[MPMediaItemPropertyArtwork] = artwork;
+    LXApplyNowPlayingInfo();
+  });
+}
+
+static void LXSetNowPlayingArtwork(NSString *artworkPath) {
+  NSMutableDictionary *info = LXNowPlayingMutableInfo();
+  BOOL hasArtwork = info[MPMediaItemPropertyArtwork] != nil;
+  if (!artworkPath.length && LXNowPlayingArtworkPath == nil && !hasArtwork) return;
+  if (artworkPath.length && [artworkPath isEqualToString:LXNowPlayingArtworkPath] && (hasArtwork || LXNowPlayingArtworkTask != nil)) return;
+
+  LXCancelNowPlayingArtworkTask();
+  LXNowPlayingArtworkRequestId += 1;
+  [info removeObjectForKey:MPMediaItemPropertyArtwork];
+  LXNowPlayingArtworkPath = artworkPath.length ? [artworkPath copy] : nil;
+  LXApplyNowPlayingInfo();
+
+  if (!artworkPath.length) return;
+
+  NSUInteger requestId = LXNowPlayingArtworkRequestId;
   void (^setArtwork)(UIImage *) = ^(UIImage *image) {
-    if (image == nil) return;
-    dispatch_async(dispatch_get_main_queue(), ^{
-      NSMutableDictionary *latestInfo = [[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo mutableCopy] ?: [NSMutableDictionary dictionary];
-      MPMediaItemArtwork *artwork = [[MPMediaItemArtwork alloc] initWithBoundsSize:image.size requestHandler:^UIImage * _Nonnull(CGSize size) {
-        return image;
-      }];
-      latestInfo[MPMediaItemPropertyArtwork] = artwork;
-      [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = latestInfo;
-    });
+    LXApplyNowPlayingArtwork(image, requestId);
   };
 
   if ([artworkPath hasPrefix:@"http://"] || [artworkPath hasPrefix:@"https://"]) {
@@ -465,6 +485,139 @@ static void LXSetNowPlayingInfo(NSDictionary *metadata) {
 
   UIImage *image = [UIImage imageWithContentsOfFile:artworkPath];
   setArtwork(image);
+}
+
+static NSNumber *LXDefaultNowPlayingRate(void) {
+  switch (LXNowPlayingState) {
+    case MPNowPlayingPlaybackStatePlaying:
+      return @1;
+    case MPNowPlayingPlaybackStatePaused:
+    case MPNowPlayingPlaybackStateStopped:
+    default:
+      return @0;
+  }
+}
+
+static NSNumber *LXCurrentNowPlayingRate(void) {
+  NSNumber *rate = [LXNowPlayingInfoCache[MPNowPlayingInfoPropertyPlaybackRate] isKindOfClass:[NSNumber class]] ? LXNowPlayingInfoCache[MPNowPlayingInfoPropertyPlaybackRate] : nil;
+  return rate ?: LXDefaultNowPlayingRate();
+}
+
+static void LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackState state, NSDictionary *options) {
+  LXNowPlayingState = state;
+
+  NSMutableDictionary *info = LXNowPlayingMutableInfo();
+  NSDictionary *stateOptions = options ?: @{};
+  NSNumber *elapsedTime = [stateOptions[@"elapsedTime"] isKindOfClass:[NSNumber class]] ? stateOptions[@"elapsedTime"] : nil;
+  NSNumber *playbackRate = [stateOptions[@"playbackRate"] isKindOfClass:[NSNumber class]] ? stateOptions[@"playbackRate"] : nil;
+
+  if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
+  else if (state == MPNowPlayingPlaybackStateStopped) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @0;
+
+  info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: LXDefaultNowPlayingRate();
+  LXApplyNowPlayingInfo();
+}
+
+static void LXClearNowPlayingInfo(void) {
+  LXCancelNowPlayingArtworkTask();
+  LXNowPlayingArtworkRequestId += 1;
+  LXNowPlayingArtworkPath = nil;
+  LXNowPlayingInfoCache = nil;
+  LXNowPlayingState = MPNowPlayingPlaybackStateStopped;
+  LXApplyNowPlayingInfo();
+}
+
+static void LXHandleTrackPlayerLifecycleNotification(NSNotification *notification) {
+  NSDictionary *userInfo = [notification.userInfo isKindOfClass:[NSDictionary class]] ? notification.userInfo : @{};
+  NSString *event = [userInfo[@"event"] isKindOfClass:[NSString class]] ? userInfo[@"event"] : @"";
+  NSString *state = [userInfo[@"state"] isKindOfClass:[NSString class]] ? userInfo[@"state"] : @"";
+  NSNumber *position = [userInfo[@"position"] isKindOfClass:[NSNumber class]] ? userInfo[@"position"] : nil;
+  NSNumber *rate = [userInfo[@"rate"] isKindOfClass:[NSNumber class]] ? userInfo[@"rate"] : nil;
+
+  if ([event isEqualToString:@"destroy"] || [event isEqualToString:@"reset"]) {
+    LXClearNowPlayingInfo();
+    return;
+  }
+
+  if (LXNowPlayingInfoCache.count == 0) return;
+
+  if ([event isEqualToString:@"seek"]) {
+    LXSetNowPlayingPlaybackState(LXNowPlayingState, @{
+      @"elapsedTime": position ?: @0,
+      @"playbackRate": LXCurrentNowPlayingRate(),
+    });
+    return;
+  }
+
+  if ([event isEqualToString:@"error"]) {
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePaused, @{
+      @"elapsedTime": position ?: @0,
+      @"playbackRate": @0,
+    });
+    return;
+  }
+
+  if ([event isEqualToString:@"stop"]) {
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStateStopped, @{
+      @"elapsedTime": @0,
+      @"playbackRate": @0,
+    });
+    return;
+  }
+
+  if (![event isEqualToString:@"state"]) return;
+
+  if ([state isEqualToString:@"playing"]) {
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePlaying, @{
+      @"elapsedTime": position ?: @0,
+      @"playbackRate": rate ?: LXCurrentNowPlayingRate(),
+    });
+    return;
+  }
+
+  if ([state isEqualToString:@"paused"] || [state isEqualToString:@"ready"] || [state isEqualToString:@"loading"]) {
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePaused, @{
+      @"elapsedTime": position ?: @0,
+      @"playbackRate": @0,
+    });
+    return;
+  }
+
+  if ([state isEqualToString:@"idle"]) {
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStateStopped, @{
+      @"elapsedTime": @0,
+      @"playbackRate": @0,
+    });
+  }
+}
+
+static void LXRegisterTrackPlayerLifecycleObserver(void) {
+  if (LXTrackPlayerLifecycleObserver != nil) return;
+  LXTrackPlayerLifecycleObserver = [[NSNotificationCenter defaultCenter] addObserverForName:LXTrackPlayerLifecycleNotificationName object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
+    LXHandleTrackPlayerLifecycleNotification(note);
+  }];
+}
+
+static void LXSetNowPlayingInfo(NSDictionary *metadata) {
+  NSMutableDictionary *info = LXNowPlayingMutableInfo();
+
+  NSString *title = [metadata[@"title"] isKindOfClass:[NSString class]] ? metadata[@"title"] : nil;
+  NSString *artist = [metadata[@"artist"] isKindOfClass:[NSString class]] ? metadata[@"artist"] : nil;
+  NSString *album = [metadata[@"album"] isKindOfClass:[NSString class]] ? metadata[@"album"] : nil;
+  NSNumber *duration = [metadata[@"duration"] isKindOfClass:[NSNumber class]] ? metadata[@"duration"] : nil;
+  NSNumber *elapsedTime = [metadata[@"elapsedTime"] isKindOfClass:[NSNumber class]] ? metadata[@"elapsedTime"] : nil;
+  NSNumber *playbackRate = [metadata[@"playbackRate"] isKindOfClass:[NSNumber class]] ? metadata[@"playbackRate"] : nil;
+  NSString *artworkPath = [metadata[@"artwork"] isKindOfClass:[NSString class]] ? metadata[@"artwork"] : @"";
+
+  if (title != nil) info[MPMediaItemPropertyTitle] = title;
+  if (artist != nil) info[MPMediaItemPropertyArtist] = artist;
+  if (album != nil) info[MPMediaItemPropertyAlbumTitle] = album;
+  if (duration != nil) info[MPMediaItemPropertyPlaybackDuration] = duration;
+  if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
+  info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
+
+  LXApplyNowPlayingInfo();
+  LXSetNowPlayingArtwork(artworkPath);
 }
 
 static UIViewController *LXTopViewController(void) {
@@ -1285,13 +1438,30 @@ RCT_REMAP_METHOD(updateNowPlayingInfo, updateNowPlayingInfo:(NSDictionary *)meta
   });
 }
 
+RCT_REMAP_METHOD(playNowPlaying, playNowPlaying:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePlaying, options);
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(pauseNowPlaying, pauseNowPlaying:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePaused, options);
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(stopNowPlaying, stopNowPlaying:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStateStopped, options);
+    resolve(nil);
+  });
+}
+
 RCT_REMAP_METHOD(clearNowPlayingInfo, clearNowPlayingInfoWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
-    if (LXNowPlayingArtworkTask != nil) {
-      [LXNowPlayingArtworkTask cancel];
-      LXNowPlayingArtworkTask = nil;
-    }
-    [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
+    LXClearNowPlayingInfo();
     resolve(nil);
   });
 }
@@ -1412,6 +1582,7 @@ RCT_REMAP_METHOD(sha1, sha1:(NSString *)input resolver:(RCTPromiseResolveBlock)r
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
+  LXRegisterTrackPlayerLifecycleObserver();
   RCTBridge *bridge = [[RCTBridge alloc] initWithDelegate:self launchOptions:launchOptions];
   [ReactNativeNavigation bootstrapWithBridge:bridge];
   self.initialProps = @{};

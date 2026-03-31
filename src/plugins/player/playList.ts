@@ -152,6 +152,7 @@ const updateCurrentTrackMetadata = async(metadata: {
   if (Platform.OS == 'ios') {
     await updateNowPlayingInfo({
       ...metadata,
+      artwork: metadata.artwork ?? '',
       playbackRate: metadata.playbackRate ?? (state.isPlaying ? settingState.setting['player.playbackRate'] : 0),
     }).catch(() => {})
   } else {
@@ -236,6 +237,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
 // console.log(tracks, time)
   const tracks = buildTracks(musicInfo, url)
   const track = tracks[0]
+  let isPlaying = false
   // await updateMusicInfo(track)
   const currentTrackIndex = await TrackPlayer.getCurrentTrack()
   await TrackPlayer.add(tracks).then(() => list.push(...tracks))
@@ -255,6 +257,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
       } else {
         await TrackPlayer.play()
         await applyCurrentVolume()
+        isPlaying = true
       }
     }
   } else {
@@ -263,6 +266,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
       await seekToTime(time)
       await TrackPlayer.play()
       await applyCurrentVolume()
+      isPlaying = true
     }
   }
 
@@ -277,7 +281,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
     artwork: typeof track.artwork == 'string' ? track.artwork : undefined,
     duration: track.duration,
     elapsedTime: time,
-    playbackRate: 1,
+    playbackRate: isPlaying ? settingState.setting['player.playbackRate'] : 0,
   })
 }
 let playPromise = Promise.resolve()

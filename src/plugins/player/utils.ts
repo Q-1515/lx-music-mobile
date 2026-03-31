@@ -6,6 +6,7 @@ import { toast } from '@/utils/tools'
 import { NativeModules, Platform } from 'react-native'
 import { clearTracks } from './playList'
 import { getAccuratePosition, seekToTime } from './seek'
+import { clearNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
 // import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
 
 
@@ -233,9 +234,13 @@ export const migratePlayerCache = async() => {
 
 export const destroy = async() => {
   if (global.lx.playerStatus.isIniting || !global.lx.playerStatus.isInitialized) return
-  await TrackPlayer.destroy()
-  clearTracks()
-  global.lx.playerStatus.isInitialized = false
+  try {
+    await TrackPlayer.destroy()
+  } finally {
+    if (Platform.OS == 'ios') await clearNowPlayingInfo().catch(() => {})
+    clearTracks()
+    global.lx.playerStatus.isInitialized = false
+  }
 }
 
 type PlayStatus = 'None' | 'Ready' | 'Playing' | 'Paused' | 'Stopped' | 'Buffering' | 'Connecting'

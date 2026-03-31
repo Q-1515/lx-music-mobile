@@ -1,7 +1,9 @@
 // import { LIST_ID_LOVE } from '@/config/constant'
 
-import { updateMetaData } from '@/plugins/player'
+import { getPosition, updateMetaData } from '@/plugins/player'
 import playerState from '@/store/player/state'
+import settingState from '@/store/setting/state'
+import { pauseNowPlaying, playNowPlaying, stopNowPlaying } from '@/utils/nativeModules/nowPlaying'
 
 export default () => {
   // const setVisibleDesktopLyric = useCommit('setVisibleDesktopLyric')
@@ -21,6 +23,7 @@ export default () => {
     if (!playerState.playMusicInfo.musicInfo) return
     void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric)
   }
+  const getElapsedTime = async() => getPosition().catch(() => playerState.progress.nowPlayTime)
   // const updateCollectStatus = async() => {
   //   // let status = !!playMusicInfo.musicInfo && await checkListExistMusic(LIST_ID_LOVE, playerState.playMusicInfo.musicInfo.id)
   //   // if (buttons.collect == status) return false
@@ -29,14 +32,30 @@ export default () => {
   // }
 
   const handlePlay = () => {
+    void getElapsedTime().then((elapsedTime) => playNowPlaying({
+      elapsedTime,
+      playbackRate: settingState.setting['player.playbackRate'],
+    }))
     // if (buttons.empty) buttons.empty = false
     if (buttons.play) return
     buttons.play = true
     setButtons()
   }
   const handlePause = () => {
+    void getElapsedTime().then((elapsedTime) => pauseNowPlaying({
+      elapsedTime,
+      playbackRate: 0,
+    }))
     // if (buttons.empty) buttons.empty = false
     if (!buttons.play) return
+    buttons.play = false
+    setButtons()
+  }
+  const handleStop = () => {
+    void stopNowPlaying({
+      elapsedTime: 0,
+      playbackRate: 0,
+    })
     buttons.play = false
     setButtons()
   }
@@ -65,7 +84,8 @@ export default () => {
   // }
   global.app_event.on('play', handlePlay)
   global.app_event.on('pause', handlePause)
-  global.app_event.on('stop', handlePause)
+  global.app_event.on('error', handlePause)
+  global.app_event.on('stop', handleStop)
   global.app_event.on('musicToggled', handleSetPlayInfo)
   // window.app_event.on(eventTaskbarNames.setTaskbarThumbnailClip, handleSetTaskbarThumbnailClip)
   // window.app_event.on('myListMusicUpdate', throttleListChange)

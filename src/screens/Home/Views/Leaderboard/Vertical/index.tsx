@@ -154,6 +154,7 @@ const styles = createStyle({
     width: '100%',
     flex: 1,
     flexDirection: 'column',
+    overflow: 'hidden',
     // borderTopWidth: BorderWidths.normal,
   },
   // content: {

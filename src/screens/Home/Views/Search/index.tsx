@@ -119,8 +119,10 @@ const styles = createStyle({
   container: {
     width: '100%',
     flex: 1,
+    overflow: 'hidden',
   },
   content: {
     flex: 1,
+    overflow: 'hidden',
   },
 })

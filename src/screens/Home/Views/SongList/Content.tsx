@@ -67,6 +67,8 @@ const styles = StyleSheet.create({
   container: {
     position: 'relative',
     flex: 1,
+    width: '100%',
+    overflow: 'hidden',
   },
 })
 

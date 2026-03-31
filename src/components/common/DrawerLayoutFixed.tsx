@@ -73,7 +73,7 @@ const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({ visibleNav
   return (
     <View
       onLayout={handleLayout}
-      style={{ width: w, flex: 1 }}
+      style={{ width: w, flex: 1, overflow: 'hidden' }}
     >
       <DrawerLayoutAndroid
         ref={drawerLayoutRef}
@@ -81,7 +81,7 @@ const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({ visibleNav
         drawerWidth={drawerWidth}
         {...props}
       >
-        <View style={{ marginRight: w == '100%' ? 0 : -1, flex: 1 }}>
+        <View style={{ marginRight: w == '100%' ? 0 : -1, flex: 1, overflow: 'hidden' }}>
           {children}
         </View>
       </DrawerLayoutAndroid>

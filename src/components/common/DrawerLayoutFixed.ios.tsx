@@ -81,8 +81,8 @@ const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({
   })
 
   return (
-    <View onLayout={handleLayout} style={[{ flex: 1, width: '100%' }, style]}>
-      <View style={{ flex: 1 }}>
+    <View onLayout={handleLayout} style={[{ flex: 1, width: '100%', overflow: 'hidden' }, style]}>
+      <View style={{ flex: 1, overflow: 'hidden' }}>
         {children}
       </View>
       {

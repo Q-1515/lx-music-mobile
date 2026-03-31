@@ -842,8 +842,18 @@ RCT_EXPORT_MODULE();
 
 - (BOOL)prepareAudioSession:(NSError **)error {
   AVAudioSession *session = [AVAudioSession sharedInstance];
-  if (@available(iOS 11.0, *)) {
-    if (![session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault policy:AVAudioSessionRouteSharingPolicyLongForm options:0 error:error]) return NO;
+  if (@available(iOS 13.0, *)) {
+    if (![session setCategory:AVAudioSessionCategoryPlayback
+                      mode:AVAudioSessionModeDefault
+        routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongFormAudio
+                   options:0
+                     error:error]) return NO;
+  } else if (@available(iOS 11.0, *)) {
+    if (![session setCategory:AVAudioSessionCategoryPlayback
+                      mode:AVAudioSessionModeDefault
+        routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongForm
+                   options:0
+                     error:error]) return NO;
   } else {
     if (![session setCategory:AVAudioSessionCategoryPlayback error:error]) return NO;
   }

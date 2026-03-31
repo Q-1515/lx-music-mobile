@@ -2,6 +2,7 @@ import {
   play as lrcPlay,
   setLyric as lrcSetLyric,
   pause as lrcPause,
+  onLyricPlay as onPluginLyricPlay,
   setPlaybackRate as lrcSetPlaybackRate,
   toggleTranslation as lrcToggleTranslation,
   toggleRoma as lrcToggleRoma,
@@ -52,6 +53,8 @@ export const pause = () => {
   lrcPause()
   void pauseDesktopLyric()
 }
+
+export const onLyricPlay = onPluginLyricPlay
 
 /**
  * stop lyric

@@ -118,6 +118,13 @@ export const pause = () => {
   else lrcTools.lrc!.pause()
 }
 
+export const onLyricPlay = (hook: PlayHook) => {
+  lrcTools.addPlayHook(hook)
+  return () => {
+    lrcTools.removePlayHook(hook)
+  }
+}
+
 // on lyric play hook
 export const useLrcPlay = (autoUpdate = true) => {
   const [lrcInfo, setLrcInfo] = useState(lrcTools.currentLineData)

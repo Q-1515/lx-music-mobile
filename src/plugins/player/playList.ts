@@ -275,6 +275,10 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
     artwork,
     duration: state.prevDuration || 0,
   }
+  const currentTrackIndex = await TrackPlayer.getCurrentTrack()
+  if (currentTrackIndex != null && currentTrackIndex > -1) {
+    await TrackPlayer.updateMetadataForTrack(currentTrackIndex, metadata).catch(() => {})
+  }
   if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.updateNowPlayingMetadata == 'function') {
     await NativeTrackPlayerModule.updateNowPlayingMetadata(metadata)
   } else {

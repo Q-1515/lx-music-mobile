@@ -71,13 +71,15 @@ const parseExtendedLyric = (lrcLinesMap: Record<string, LxLyricLine>, extendedLy
     const timeField = result[0]
     const text = line.replace(timeFieldExp, '').trim()
     if (!text) continue
+    const { text: displayText } = parseLineWords(text)
+    if (!displayText) continue
 
     const times = timeField.match(timeExp)
     if (times == null) continue
     for (let time of times) {
       time = formatTimeLabel(time)
       const targetLine = lrcLinesMap[time]
-      if (targetLine) targetLine.extendedLyrics.push(text)
+      if (targetLine) targetLine.extendedLyrics.push(displayText)
     }
   }
 }
@@ -219,8 +221,9 @@ export default class LxLyricPlayer {
       if (times == null) continue
       for (let time of times) {
         time = formatTimeLabel(time)
+        const { words, text: displayText } = parseLineWords(text)
         if (linesMap[time]) {
-          linesMap[time].extendedLyrics.push(text)
+          linesMap[time].extendedLyrics.push(displayText)
           continue
         }
         const timeArr = time.split(':')
@@ -230,7 +233,6 @@ export default class LxLyricPlayer {
         }
         if (timeArr[2].includes('.')) timeArr.splice(2, 1, ...timeArr[2].split('.'))
 
-        const { words, text: displayText } = parseLineWords(text)
         linesMap[time] = {
           time: parseInt(timeArr[0]) * 60 * 60 * 1000 + parseInt(timeArr[1]) * 60 * 1000 + parseInt(timeArr[2]) * 1000 + parseInt(timeArr[3] || '0'),
           text: displayText,

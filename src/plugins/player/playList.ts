@@ -23,6 +23,31 @@ const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
   getDuration?: () => Promise<number>
 }
 
+const formatNowPlayingTitleLine = (title?: string, artist?: string) => {
+  const safeTitle = title || 'Unknow'
+  return artist ? `${safeTitle} - ${artist}` : safeTitle
+}
+
+const formatIOSNowPlayingMetadata = (metadata: {
+  title?: string
+  artist?: string
+  artwork?: string
+  duration?: number
+  elapsedTime?: number
+  playbackRate?: number
+  lyric?: string
+}) => {
+  return {
+    title: formatNowPlayingTitleLine(metadata.title, metadata.artist),
+    artist: metadata.lyric ?? '',
+    album: '',
+    artwork: metadata.artwork,
+    duration: metadata.duration,
+    elapsedTime: metadata.elapsedTime,
+    playbackRate: metadata.playbackRate,
+  }
+}
+
 const formatMusicInfo = (musicInfo: LX.Player.PlayMusic) => {
   return 'progress' in musicInfo ? {
     id: musicInfo.id,
@@ -170,10 +195,11 @@ const ensureCurrentTrackMetadata = (metadata: {
   playbackRate?: number
 }) => {
   void (async() => {
+    const targetMetadata = Platform.OS == 'ios' ? formatIOSNowPlayingMetadata(metadata) : metadata
     const delays = Platform.OS == 'ios' ? [0, 160, 420, 900] : [0]
     for (const delay of delays) {
       if (delay) await wait(delay)
-      await updateCurrentTrackMetadata(metadata)
+      await updateCurrentTrackMetadata(targetMetadata)
     }
   })()
 }
@@ -315,20 +341,26 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
   state.isPlaying = await TrackPlayer.getState() == State.Playing
   let artwork = isShowNotificationImage ? mInfo.pic ?? prevArtwork : undefined
   if (mInfo.pic) prevArtwork = mInfo.pic
-  const useLyricAsNowPlayingTitle = Platform.OS != 'ios'
   let name: string
   let singer: string
-  if (!useLyricAsNowPlayingTitle || !state.isPlaying || lyric == null) {
+  let album: string | undefined
+  if (Platform.OS == 'ios') {
+    name = formatNowPlayingTitleLine(mInfo.name ?? 'Unknow', mInfo.singer ?? '')
+    singer = lyric ?? ''
+    album = ''
+  } else if (!state.isPlaying || lyric == null) {
     name = mInfo.name ?? 'Unknow'
     singer = mInfo.singer ?? 'Unknow'
+    album = mInfo.album ?? undefined
   } else {
     name = lyric
     singer = `${mInfo.name}${mInfo.singer ? ` - ${mInfo.singer}` : ''}`
+    album = mInfo.album ?? undefined
   }
   const metadata = {
     title: name,
     artist: singer,
-    album: mInfo.album ?? undefined,
+    album,
     artwork,
     duration: state.prevDuration || 0,
     elapsedTime: await getAccuratePosition().catch(() => 0),

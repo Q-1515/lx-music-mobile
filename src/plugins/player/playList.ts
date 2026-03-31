@@ -258,9 +258,10 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
   state.isPlaying = await TrackPlayer.getState() == State.Playing
   let artwork = isShowNotificationImage ? mInfo.pic ?? prevArtwork : undefined
   if (mInfo.pic) prevArtwork = mInfo.pic
+  const useLyricAsNowPlayingTitle = Platform.OS != 'ios'
   let name: string
   let singer: string
-  if (!state.isPlaying || lyric == null) {
+  if (!useLyricAsNowPlayingTitle || !state.isPlaying || lyric == null) {
     name = mInfo.name ?? 'Unknow'
     singer = mInfo.singer ?? 'Unknow'
   } else {

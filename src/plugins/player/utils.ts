@@ -198,14 +198,7 @@ export const setVolume = async(num: number) => TrackPlayer.setVolume(num)
 export const setPlaybackRate = async(num: number) => TrackPlayer.setRate(num)
 export const updateNowPlayingTitles = async(duration: number, title: string, artist: string, album: string) => {
   console.log('set playing titles', duration, title, artist, album)
-  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.updateNowPlayingMetadata == 'function') {
-    return NativeTrackPlayerModule.updateNowPlayingMetadata({
-      title,
-      artist,
-      album: album || undefined,
-      duration: duration > 0 ? duration / 1000 : 0,
-    })
-  }
+  if (Platform.OS == 'ios') return Promise.resolve()
   return TrackPlayer.updateNowPlayingTitles(duration, title, artist, album)
 }
 

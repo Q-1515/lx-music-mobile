@@ -4,6 +4,7 @@ import { defaultUrl } from '@/config'
 import { NativeModules, Platform } from 'react-native'
 // import { action as playerAction } from '@/store/modules/player'
 import settingState from '@/store/setting/state'
+import { seekToTime } from './seek'
 
 
 const list: LX.Player.Track[] = []
@@ -148,7 +149,7 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
   const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
   const trackIndex = queue.findIndex(t => t.id == restoredTrack.id)
   if (trackIndex > -1) await TrackPlayer.skip(trackIndex)
-  if (position > 0) await TrackPlayer.seekTo(position)
+  if (position > 0) await seekToTime(position)
   if (isPlaying) await TrackPlayer.play()
   else await TrackPlayer.pause()
   await applyCurrentVolume()
@@ -200,7 +201,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
 
   if (currentTrackIndex == null) {
     if (!isTempTrack(track.id as string)) {
-      if (time) await TrackPlayer.seekTo(time)
+      if (time) await seekToTime(time)
       if (global.lx.restorePlayInfo) {
         await TrackPlayer.pause()
         // let startupAutoPlay = settingState.setting['player.startupAutoPlay']
@@ -216,7 +217,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
   } else {
     await TrackPlayer.pause()
     if (!isTempTrack(track.id as string)) {
-      await TrackPlayer.seekTo(time)
+      await seekToTime(time)
       await TrackPlayer.play()
       await applyCurrentVolume()
     }

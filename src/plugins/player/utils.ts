@@ -5,6 +5,7 @@ import { existsFile, moveFile, privateStorageDirectoryPath, temporaryDirectoryPa
 import { toast } from '@/utils/tools'
 import { NativeModules, Platform } from 'react-native'
 import { clearTracks } from './playList'
+import { getAccuratePosition, seekToTime } from './seek'
 // import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
 
 
@@ -174,10 +175,7 @@ export const setResource = (musicInfo: LX.Player.PlayMusic, url: string, duratio
 
 export const setPlay = async() => TrackPlayer.play()
 export const getPosition = async() => {
-  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getPosition == 'function') {
-    return NativeTrackPlayerModule.getPosition()
-  }
-  return TrackPlayer.getPosition()
+  return getAccuratePosition()
 }
 export const getDuration = async() => {
   if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getDuration == 'function') {
@@ -193,7 +191,7 @@ export const setLoop = async(loop: boolean) => TrackPlayer.setRepeatMode(loop ? 
 
 export const setPause = async() => TrackPlayer.pause()
 // export const skipToNext = () => TrackPlayer.skipToNext()
-export const setCurrentTime = async(time: number) => TrackPlayer.seekTo(time)
+export const setCurrentTime = async(time: number) => seekToTime(time)
 export const setVolume = async(num: number) => TrackPlayer.setVolume(num)
 export const setPlaybackRate = async(num: number) => TrackPlayer.setRate(num)
 export const updateNowPlayingTitles = async(duration: number, title: string, artist: string, album: string) => {

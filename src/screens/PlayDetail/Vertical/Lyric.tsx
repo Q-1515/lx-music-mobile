@@ -11,6 +11,7 @@ import { setSpText } from '@/utils/pixelRatio'
 import playerState from '@/store/player/state'
 import { scrollTo } from '@/utils/scroll'
 import PlayLine, { type PlayLineType } from '../components/PlayLine'
+import KaraokeLine from '../components/KaraokeLine'
 // import { screenkeepAwake } from '@/utils/nativeModules/utils'
 // import { log } from '@/utils/log'
 // import { toast } from '@/utils/tools'
@@ -61,9 +62,10 @@ interface LineProps {
   lineNum: number
   activeLine: number
   activeWordIndex: number
+  activeWordProgress: number
   onLayout: (lineNum: number, height: number, width: number) => void
 }
-const LrcLine = memo(({ line, lineNum, activeLine, activeWordIndex, onLayout }: LineProps) => {
+const LrcLine = memo(({ line, lineNum, activeLine, activeWordIndex, activeWordProgress, onLayout }: LineProps) => {
   const theme = useTheme()
   const lrcFontSize = useSettingValue('playDetail.vertical.style.lrcFontSize')
   const textAlign = useSettingValue('playDetail.style.align')
@@ -73,12 +75,12 @@ const LrcLine = memo(({ line, lineNum, activeLine, activeWordIndex, onLayout }: 
   const colors = useMemo(() => {
     const active = activeLine == lineNum
     return active ? [
-      theme['c-primary'],
-      theme['c-primary-alpha-200'],
+      theme['c-primary-dark-200'],
+      theme['c-450'],
       1,
     ] as const : [
-      theme['c-350'],
-      theme['c-300'],
+      theme['c-450'],
+      theme['c-450'],
       0.6,
     ] as const
   }, [activeLine, lineNum, theme])
@@ -101,11 +103,7 @@ const LrcLine = memo(({ line, lineNum, activeLine, activeWordIndex, onLayout }: 
                 lineHeight,
                 opacity: colors[2],
               }} size={size}>
-                {
-                  line.words.map((word, index) => (
-                    <Text key={index} size={size} color={index <= activeWordIndex ? colors[0] : theme['c-350']}>{word.text}</Text>
-                  ))
-                }
+                <KaraokeLine words={line.words} activeWordIndex={activeWordIndex} activeWordProgress={activeWordProgress} size={size} playedColor={colors[0]} inactiveColor={colors[1]} />
               </Text>
             )
           : (
@@ -133,7 +131,8 @@ const LrcLine = memo(({ line, lineNum, activeLine, activeWordIndex, onLayout }: 
   const isActive = nextProps.activeLine == nextProps.lineNum
   if (wasActive || isActive) {
     return prevProps.activeLine == nextProps.activeLine &&
-      prevProps.activeWordIndex == nextProps.activeWordIndex
+      prevProps.activeWordIndex == nextProps.activeWordIndex &&
+      prevProps.activeWordProgress == nextProps.activeWordProgress
   }
   return true
 })
@@ -141,7 +140,7 @@ const wait = async() => new Promise(resolve => setTimeout(resolve, 100))
 
 export default () => {
   const lyricLines = useLrcSet()
-  const { line, wordIndex } = useLrcPlay()
+  const { line, wordIndex, wordProgress } = useLrcPlay()
   const flatListRef = useRef<FlatList>(null)
   const playLineRef = useRef<PlayLineType>(null)
   const isPauseScrollRef = useRef(true)
@@ -324,7 +323,7 @@ export default () => {
 
   const renderItem: FlatListType['renderItem'] = ({ item, index }) => {
     return (
-      <LrcLine line={item} lineNum={index} activeLine={line} activeWordIndex={wordIndex} onLayout={handleLineLayout} />
+      <LrcLine line={item} lineNum={index} activeLine={line} activeWordIndex={wordIndex} activeWordProgress={wordProgress} onLayout={handleLineLayout} />
     )
   }
   const getkey: FlatListType['keyExtractor'] = (item, index) => `${index}${item.text}`

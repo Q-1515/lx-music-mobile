@@ -4,7 +4,7 @@ import LxLyricPlayer, { type LxLyricLine } from './lxLyricPlayer'
 // import { getStore, subscribe } from '@/store'
 export type Line = (Lines[number] & { rawText?: string, words?: { startTime: number, duration: number, text: string }[] }) | LxLyricLine
 type PlayerLines = Line[]
-type PlayHook = (line: number, text: string, wordIndex: number) => void
+type PlayHook = (line: number, text: string, wordIndex: number, wordProgress: number) => void
 type SetLyricHook = (lines: PlayerLines) => void
 
 const lxLyricTextRxp = /<\d+,\d+>/
@@ -14,7 +14,7 @@ const lrcTools = {
   lrc: null as Lyric | null,
   lxLrc: null as LxLyricPlayer | null,
   useLxPlayer: false,
-  currentLineData: { line: 0, text: '', wordIndex: -1 },
+  currentLineData: { line: 0, text: '', wordIndex: -1, wordProgress: 0 },
   currentLines: [] as PlayerLines,
   playHooks: [] as PlayHook[],
   setLyricHooks: [] as SetLyricHook[],
@@ -38,24 +38,26 @@ const lrcTools = {
       offset: 100,
     })
   },
-  onPlay(line: number, text: string, wordIndex: number = -1) {
+  onPlay(line: number, text: string, wordIndex: number = -1, wordProgress: number = 0) {
     this.currentLineData.line = line
     // console.log(line)
     this.currentLineData.text = text
     this.currentLineData.wordIndex = wordIndex
-    for (const hook of this.playHooks) hook(line, text, wordIndex)
+    this.currentLineData.wordProgress = wordProgress
+    for (const hook of this.playHooks) hook(line, text, wordIndex, wordProgress)
   },
   onSetLyric(lines: PlayerLines) {
     this.currentLines = lines
     this.currentLineData.line = 0
     this.currentLineData.text = ''
     this.currentLineData.wordIndex = -1
-    for (const hook of this.playHooks) hook(-1, '', -1)
+    this.currentLineData.wordProgress = 0
+    for (const hook of this.playHooks) hook(-1, '', -1, 0)
     for (const hook of this.setLyricHooks) hook(lines)
   },
   addPlayHook(hook: PlayHook) {
     this.playHooks.push(hook)
-    hook(this.currentLineData.line, this.currentLineData.text, this.currentLineData.wordIndex)
+    hook(this.currentLineData.line, this.currentLineData.text, this.currentLineData.wordIndex, this.currentLineData.wordProgress)
   },
   removePlayHook(hook: PlayHook) {
     this.playHooks.splice(this.playHooks.indexOf(hook), 1)
@@ -122,10 +124,10 @@ export const useLrcPlay = (autoUpdate = true) => {
   useEffect(() => {
     if (!autoUpdate) return
     const setLrcCallback: SetLyricHook = () => {
-      setLrcInfo({ line: 0, text: '', wordIndex: -1 })
+      setLrcInfo({ line: 0, text: '', wordIndex: -1, wordProgress: 0 })
     }
-    const playCallback: PlayHook = (line, text, wordIndex) => {
-      setLrcInfo({ line, text, wordIndex })
+    const playCallback: PlayHook = (line, text, wordIndex, wordProgress) => {
+      setLrcInfo({ line, text, wordIndex, wordProgress })
     }
     lrcTools.addSetLyricHook(setLrcCallback)
     lrcTools.addPlayHook(playCallback)

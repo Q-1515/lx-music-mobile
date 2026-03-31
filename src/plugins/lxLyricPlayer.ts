@@ -16,6 +16,7 @@ export interface LxLyricPlayState {
   line: number
   text: string
   wordIndex: number
+  wordProgress: number
 }
 
 const noop = () => {}
@@ -88,7 +89,7 @@ export default class LxLyricPlayer {
   extendedLyrics: string[] = []
   tags: Record<string, string | number> = {}
   lines: LxLyricLine[] = []
-  onPlay: (line: number, text: string, wordIndex: number) => void
+  onPlay: (line: number, text: string, wordIndex: number, wordProgress: number) => void
   onSetLyric: (lines: LxLyricLine[]) => void
   isPlay = false
   curLineNum = 0
@@ -112,7 +113,7 @@ export default class LxLyricPlayer {
     extendedLyrics?: string[]
     offset?: number
     playbackRate?: number
-    onPlay?: (line: number, text: string, wordIndex: number) => void
+    onPlay?: (line: number, text: string, wordIndex: number, wordProgress: number) => void
     onSetLyric?: (lines: LxLyricLine[]) => void
   } = {}) {
     this.lyric = lyric
@@ -139,17 +140,20 @@ export default class LxLyricPlayer {
     return line.time + 3000
   }
 
-  private getWordIndex(lineIndex: number, currentTime: number) {
+  private getWordState(lineIndex: number, currentTime: number) {
     const line = this.lines[lineIndex]
-    if (!line || !line.words.length) return -1
+    if (!line || !line.words.length) return { index: -1, progress: 0 }
     const elapsed = currentTime - line.time
-    if (elapsed < 0) return -1
+    if (elapsed < 0) return { index: -1, progress: 0 }
     for (let i = 0; i < line.words.length; i++) {
       const word = line.words[i]
-      if (elapsed < word.startTime) return Math.max(i - 1, -1)
-      if (elapsed <= word.startTime + word.duration) return i
+      if (elapsed < word.startTime) return { index: Math.max(i - 1, -1), progress: 1 }
+      if (elapsed <= word.startTime + word.duration) {
+        const progress = word.duration > 0 ? Math.min(Math.max((elapsed - word.startTime) / word.duration, 0), 1) : 1
+        return { index: i, progress }
+      }
     }
-    return line.words.length - 1
+    return { index: line.words.length - 1, progress: 1 }
   }
 
   private emitState(currentTime: number) {
@@ -157,16 +161,20 @@ export default class LxLyricPlayer {
       if (this.curLineNum != -1 || this.curWordIndex != -1) {
         this.curLineNum = -1
         this.curWordIndex = -1
-        this.onPlay(-1, '', -1)
+        this.onPlay(-1, '', -1, 0)
       }
       return
     }
     const lineIndex = this.findCurLineNum(currentTime)
-    const wordIndex = this.getWordIndex(lineIndex, currentTime)
+    const { index: wordIndex, progress: wordProgress } = this.getWordState(lineIndex, currentTime)
+    if (this.curLineNum == lineIndex && this.curWordIndex == wordIndex && this.curWordIndex > -1) {
+      this.onPlay(lineIndex, this.lines[lineIndex]?.text ?? '', wordIndex, wordProgress)
+      return
+    }
     if (this.curLineNum == lineIndex && this.curWordIndex == wordIndex) return
     this.curLineNum = lineIndex
     this.curWordIndex = wordIndex
-    this.onPlay(lineIndex, this.lines[lineIndex]?.text ?? '', wordIndex)
+    this.onPlay(lineIndex, this.lines[lineIndex]?.text ?? '', wordIndex, wordProgress)
   }
 
   private tick() {

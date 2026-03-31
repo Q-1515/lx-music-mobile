@@ -7,6 +7,7 @@
 #import <ReactNativeNavigation/ReactNativeNavigation.h>
 #import <Security/Security.h>
 #import <AVFoundation/AVFoundation.h>
+#import <MediaPlayer/MediaPlayer.h>
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <math.h>
 
@@ -407,6 +408,63 @@ static BOOL LXClearDirectoryContents(NSString *directoryPath, NSError **error) {
     if (![fileManager removeItemAtPath:fullPath error:error]) return NO;
   }
   return YES;
+}
+
+static NSURLSessionDataTask *LXNowPlayingArtworkTask = nil;
+
+static void LXSetNowPlayingInfo(NSDictionary *metadata) {
+  NSMutableDictionary *info = [[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo mutableCopy] ?: [NSMutableDictionary dictionary];
+
+  NSString *title = [metadata[@"title"] isKindOfClass:[NSString class]] ? metadata[@"title"] : nil;
+  NSString *artist = [metadata[@"artist"] isKindOfClass:[NSString class]] ? metadata[@"artist"] : nil;
+  NSString *album = [metadata[@"album"] isKindOfClass:[NSString class]] ? metadata[@"album"] : nil;
+  NSNumber *duration = [metadata[@"duration"] isKindOfClass:[NSNumber class]] ? metadata[@"duration"] : nil;
+  NSNumber *elapsedTime = [metadata[@"elapsedTime"] isKindOfClass:[NSNumber class]] ? metadata[@"elapsedTime"] : nil;
+  NSNumber *playbackRate = [metadata[@"playbackRate"] isKindOfClass:[NSNumber class]] ? metadata[@"playbackRate"] : nil;
+
+  if (title != nil) info[MPMediaItemPropertyTitle] = title;
+  if (artist != nil) info[MPMediaItemPropertyArtist] = artist;
+  if (album != nil) info[MPMediaItemPropertyAlbumTitle] = album;
+  if (duration != nil) info[MPMediaItemPropertyPlaybackDuration] = duration;
+  if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
+  info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: @1;
+
+  [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = info;
+
+  NSString *artworkPath = [metadata[@"artwork"] isKindOfClass:[NSString class]] ? metadata[@"artwork"] : nil;
+  if (!artworkPath.length) return;
+
+  if (LXNowPlayingArtworkTask != nil) {
+    [LXNowPlayingArtworkTask cancel];
+    LXNowPlayingArtworkTask = nil;
+  }
+
+  void (^setArtwork)(UIImage *) = ^(UIImage *image) {
+    if (image == nil) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      NSMutableDictionary *latestInfo = [[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo mutableCopy] ?: [NSMutableDictionary dictionary];
+      MPMediaItemArtwork *artwork = [[MPMediaItemArtwork alloc] initWithBoundsSize:image.size requestHandler:^UIImage * _Nonnull(CGSize size) {
+        return image;
+      }];
+      latestInfo[MPMediaItemPropertyArtwork] = artwork;
+      [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = latestInfo;
+    });
+  };
+
+  if ([artworkPath hasPrefix:@"http://"] || [artworkPath hasPrefix:@"https://"]) {
+    NSURL *url = [NSURL URLWithString:artworkPath];
+    if (url == nil) return;
+    LXNowPlayingArtworkTask = [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+      if (error != nil || data.length == 0) return;
+      UIImage *image = [UIImage imageWithData:data];
+      setArtwork(image);
+    }];
+    [LXNowPlayingArtworkTask resume];
+    return;
+  }
+
+  UIImage *image = [UIImage imageWithContentsOfFile:artworkPath];
+  setArtwork(image);
 }
 
 static UIViewController *LXTopViewController(void) {
@@ -1203,6 +1261,37 @@ RCT_REMAP_METHOD(clearAppCache, clearAppCacheWithResolver:(RCTPromiseResolveBloc
       }
     }
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    resolve(nil);
+  });
+}
+
+@end
+
+@interface NowPlayingModule : NSObject<RCTBridgeModule>
+@end
+
+@implementation NowPlayingModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return NO;
+}
+
+RCT_REMAP_METHOD(updateNowPlayingInfo, updateNowPlayingInfo:(NSDictionary *)metadata resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    LXSetNowPlayingInfo(metadata ?: @{});
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(clearNowPlayingInfo, clearNowPlayingInfoWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (LXNowPlayingArtworkTask != nil) {
+      [LXNowPlayingArtworkTask cancel];
+      LXNowPlayingArtworkTask = nil;
+    }
+    [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
     resolve(nil);
   });
 }

@@ -5,6 +5,7 @@ import { NativeModules, Platform } from 'react-native'
 // import { action as playerAction } from '@/store/modules/player'
 import settingState from '@/store/setting/state'
 import { getAccuratePosition, seekToTime } from './seek'
+import { updateNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
 
 
 const list: LX.Player.Track[] = []
@@ -19,15 +20,6 @@ export const state = {
 }
 
 const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
-  updateNowPlayingMetadata?: (metadata: {
-    title?: string
-    artist?: string
-    album?: string
-    artwork?: string
-    duration?: number
-    elapsedTime?: number
-    isLiveStream?: boolean
-  }) => Promise<void>
   getDuration?: () => Promise<number>
 }
 
@@ -151,13 +143,17 @@ const updateCurrentTrackMetadata = async(metadata: {
   artwork?: string
   duration?: number
   elapsedTime?: number
+  playbackRate?: number
 }) => {
   const currentTrackIndex = await TrackPlayer.getCurrentTrack().catch(() => null)
   if (currentTrackIndex != null && currentTrackIndex > -1) {
     await TrackPlayer.updateMetadataForTrack(currentTrackIndex, metadata).catch(() => {})
   }
-  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.updateNowPlayingMetadata == 'function') {
-    await NativeTrackPlayerModule.updateNowPlayingMetadata(metadata).catch(() => {})
+  if (Platform.OS == 'ios') {
+    await updateNowPlayingInfo({
+      ...metadata,
+      playbackRate: metadata.playbackRate ?? (state.isPlaying ? settingState.setting['player.playbackRate'] : 0),
+    }).catch(() => {})
   } else {
     await TrackPlayer.updateNowPlayingMetadata(metadata, state.isPlaying).catch(() => {})
   }
@@ -170,6 +166,7 @@ const ensureCurrentTrackMetadata = (metadata: {
   artwork?: string
   duration?: number
   elapsedTime?: number
+  playbackRate?: number
 }) => {
   void (async() => {
     const delays = Platform.OS == 'ios' ? [0, 160, 420, 900] : [0]
@@ -197,6 +194,7 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
     artwork: typeof restoredTrack.artwork == 'string' ? restoredTrack.artwork : undefined,
     duration: restoredTrack.duration,
     elapsedTime: position,
+    playbackRate: isPlaying ? settingState.setting['player.playbackRate'] : 0,
   })
 }
 
@@ -279,6 +277,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
     artwork: typeof track.artwork == 'string' ? track.artwork : undefined,
     duration: track.duration,
     elapsedTime: time,
+    playbackRate: 1,
   })
 }
 let playPromise = Promise.resolve()
@@ -329,6 +328,7 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
     artwork,
     duration: state.prevDuration || 0,
     elapsedTime: await getAccuratePosition().catch(() => 0),
+    playbackRate: state.isPlaying ? settingState.setting['player.playbackRate'] : 0,
   }
   await updateCurrentTrackMetadata(metadata)
 }

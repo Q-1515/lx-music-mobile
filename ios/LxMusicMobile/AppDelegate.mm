@@ -1249,8 +1249,7 @@ RCT_EXPORT_MODULE();
   dispatch_sync(self.renderQueue, ^{
     if (self.engine != nil) return;
 
-    AVAudioCommonFormat commonFormat = bitsPerSample <= 16 ? AVAudioPCMFormatInt16 : AVAudioPCMFormatInt32;
-    self.outputFormat = [[AVAudioFormat alloc] initWithCommonFormat:commonFormat
+    self.outputFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
                                                          sampleRate:sampleRate
                                                            channels:(AVAudioChannelCount)channels
                                                         interleaved:NO];
@@ -1351,23 +1350,14 @@ RCT_EXPORT_MODULE();
   }
 
   pcmBuffer.frameLength = (AVAudioFrameCount)playableFrames;
-  const int shift = self.bitsPerSample <= 16 ? (int)(16 - self.bitsPerSample) : (int)(32 - self.bitsPerSample);
-
-  if (self.outputFormat.commonFormat == AVAudioPCMFormatInt16) {
-    int16_t *const *channels = pcmBuffer.int16ChannelData;
-    for (NSUInteger channel = 0; channel < self.channels; channel++) {
-      for (NSUInteger sample = 0; sample < playableFrames; sample++) {
-        FLAC__int32 value = decodedBuffer[channel][sample + startOffset];
-        channels[channel][sample] = (int16_t)(shift > 0 ? (value << shift) : value);
-      }
-    }
-  } else {
-    int32_t *const *channels = pcmBuffer.int32ChannelData;
-    for (NSUInteger channel = 0; channel < self.channels; channel++) {
-      for (NSUInteger sample = 0; sample < playableFrames; sample++) {
-        FLAC__int32 value = decodedBuffer[channel][sample + startOffset];
-        channels[channel][sample] = shift > 0 ? (value << shift) : value;
-      }
+  float *const *channels = pcmBuffer.floatChannelData;
+  double scale = self.bitsPerSample > 1 ? ldexp(1.0, (int)self.bitsPerSample - 1) : 1.0;
+  if (scale <= 0) scale = 1.0;
+  for (NSUInteger channel = 0; channel < self.channels; channel++) {
+    for (NSUInteger sample = 0; sample < playableFrames; sample++) {
+      FLAC__int32 value = decodedBuffer[channel][sample + startOffset];
+      double normalized = LXClampDouble((double)value / scale, -1.0, 1.0);
+      channels[channel][sample] = (float)normalized;
     }
   }
 

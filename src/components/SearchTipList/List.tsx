@@ -1,4 +1,4 @@
-import { useState, forwardRef, useImperativeHandle, type Ref } from 'react'
+import { useState, useRef, useImperativeHandle, forwardRef, type Ref } from 'react'
 import { FlatList, type FlatListProps } from 'react-native'
 
 // import InsetShadow from 'react-native-inset-shadow'
@@ -21,13 +21,17 @@ export interface ListType<T> {
 
 const List = <T extends ItemT<T>>(props: ListProps<T>, ref: Ref<ListType<T>>) => {
   const [list, setList] = useState<T[]>([])
+  const flatListRef = useRef<FlatList<T>>(null)
   useImperativeHandle(ref, () => ({
     setList(list) {
       setList(list)
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: false })
+      })
     },
   }))
 
-  return <FlatList removeClippedSubviews={true} keyboardShouldPersistTaps={'always'} {...props} data={list} />
+  return <FlatList ref={flatListRef} removeClippedSubviews={true} keyboardShouldPersistTaps={'always'} {...props} data={list} />
 }
 
 export default forwardRef(List) as

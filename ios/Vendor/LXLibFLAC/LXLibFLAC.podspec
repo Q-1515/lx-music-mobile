@@ -5,7 +5,7 @@ Pod::Spec.new do |s|
   s.homepage = 'https://github.com/xiph/flac'
   s.license = { :type => 'BSD', :file => 'COPYING.Xiph' }
   s.author = { 'Xiph.Org Foundation' => 'xiph.org' }
-  s.source = { :path => '.' }
+  s.source = { :git => 'https://github.com/xiph/flac.git', :tag => s.version.to_s }
   s.platform = :ios, '13.4'
   s.requires_arc = false
 

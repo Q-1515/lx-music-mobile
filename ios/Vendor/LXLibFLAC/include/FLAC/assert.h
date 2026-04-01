@@ -39,7 +39,7 @@
 #define FLAC__ASSERT_DECLARATION(x) x
 #else
 #ifndef NDEBUG
-#include <assert.h>
+#include_next <assert.h>
 #define FLAC__ASSERT(x) assert(x)
 #define FLAC__ASSERT_DECLARATION(x) x
 #else

@@ -46,6 +46,7 @@ Pod::Spec.new do |s|
 
   s.pod_target_xcconfig = {
     'HEADER_SEARCH_PATHS' => '$(inherited) "${PODS_TARGET_SRCROOT}" "${PODS_TARGET_SRCROOT}/include" "${PODS_TARGET_SRCROOT}/src/include" "${PODS_TARGET_SRCROOT}/src/include/private" "${PODS_TARGET_SRCROOT}/src/include/protected"',
+    'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) HAVE_CONFIG_H=1',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'gnu++17',
   }
 end

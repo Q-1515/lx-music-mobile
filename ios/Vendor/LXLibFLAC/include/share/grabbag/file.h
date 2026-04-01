@@ -26,7 +26,7 @@
 
 /* needed because of off_t */
 #ifdef HAVE_CONFIG_H
-#  include <config.h>
+#  include "lx_libflac_config.h"
 #endif
 
 #include <sys/types.h> /* for off_t */

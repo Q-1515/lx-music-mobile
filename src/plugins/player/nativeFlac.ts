@@ -62,14 +62,10 @@ const defaultUserAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)
 let currentTrackId = ''
 let currentState: NativeFlacState = 'idle'
 let currentMode: 'none' | 'file' | 'stream' = 'none'
-let currentMusicInfo: LX.Player.PlayMusic | null = null
-let currentUrl = ''
 
 const clearCurrentContext = (nextState: NativeFlacState) => {
   currentTrackId = ''
   currentMode = 'none'
-  currentMusicInfo = null
-  currentUrl = ''
   currentState = nextState
 }
 
@@ -168,8 +164,6 @@ export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: s
 
 export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number) => {
   const nextTrackId = `nativeflac://${getMusicInfo(musicInfo).id}`
-  currentMusicInfo = musicInfo
-  currentUrl = url
 
   if (isRemoteUrl(url) && isStreamingFlacSupported && position <= 0) {
     currentTrackId = nextTrackId
@@ -261,23 +255,7 @@ export const resetNativeFlacPlayback = async() => {
 export const seekNativeFlacPlayback = async(position: number) => {
   if (!currentTrackId) return position
   if (currentMode == 'stream') {
-    try {
-      return await seekStreamingFlac(position)
-    } catch (err) {
-      if (!currentMusicInfo || !currentUrl || !NativeFlacPlayer) return getStreamingFlacPosition().catch(() => position)
-      const mode = currentMode
-      const currentPosition = await getStreamingFlacPosition().catch(() => position)
-      const shouldResume = (await getStreamingFlacState().catch(() => currentState)) == 'playing'
-      await stopStreamingFlac().catch(() => {})
-      const path = await ensurePlayablePath(currentMusicInfo, currentUrl)
-      const info = await playNativeFile(path, position)
-      if (currentMode == mode) {
-        currentMode = 'file'
-        currentState = 'playing'
-      }
-      if (!shouldResume) await pauseNativeFlacPlayback()
-      return shouldResume ? info.position : currentPosition
-    }
+    return seekStreamingFlac(position)
   }
   if (!NativeFlacPlayer) return position
   return NativeFlacPlayer.seekTo(position)
@@ -346,8 +324,6 @@ export const onNativeFlacPlayerEvent = (listener: (event: NativeFlacEvent) => vo
           currentState = 'stopped'
           currentTrackId = ''
           currentMode = 'none'
-          currentMusicInfo = null
-          currentUrl = ''
           break
         case 'error':
           currentState = 'paused'
@@ -376,8 +352,6 @@ export const onNativeFlacPlayerEvent = (listener: (event: NativeFlacEvent) => vo
         currentState = 'stopped'
         currentTrackId = ''
         currentMode = 'none'
-        currentMusicInfo = null
-        currentUrl = ''
         listener({
           type: 'ended',
           state: 'stopped',

@@ -50,10 +50,18 @@ export default ({ children }: Props) => {
         style={{ position: 'absolute', left: 0, top: 0, height: windowSize.height, width: windowSize.width, backgroundColor: theme['c-content-background'] }}
         source={theme['bg-image']}
         resizeMode="cover"
-      >
-      </ImageBackground>
+      />
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: theme['c-main-background'],
+          },
+        ]}
+      />
       <ContentContainer>
-        <View style={{ flex: 1, flexDirection: 'column', backgroundColor: theme['c-main-background'] }}>
+        <View style={{ flex: 1, flexDirection: 'column' }}>
           {children}
         </View>
       </ContentContainer>

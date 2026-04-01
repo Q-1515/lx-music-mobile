@@ -1062,8 +1062,6 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 @interface StreamingFlacPlayerModule : RCTEventEmitter<RCTBridgeModule, NSURLSessionDataDelegate>
 @property (nonatomic, strong) NSURLSession *session;
-@property (nonatomic, strong) NSURLSessionDataTask *task;
-@property (nonatomic, strong) NSMutableData *streamData;
 @property (nonatomic, strong) NSCondition *streamCondition;
 @property (nonatomic, strong) dispatch_queue_t decoderQueue;
 @property (nonatomic, strong) dispatch_queue_t renderQueue;
@@ -1071,6 +1069,9 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, strong) AVAudioPlayerNode *playerNode;
 @property (nonatomic, strong) AVAudioUnitTimePitch *timePitchNode;
 @property (nonatomic, strong) AVAudioFormat *outputFormat;
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *requestHeaders;
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSData *> *rangeChunkCache;
+@property (nonatomic, strong) NSData *fullStreamData;
 @property (nonatomic, copy) NSString *currentState;
 @property (nonatomic, copy) NSString *currentURL;
 @property (nonatomic, strong) NSError *streamError;
@@ -1079,7 +1080,6 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) BOOL stopRequested;
 @property (nonatomic, assign) BOOL playbackStarted;
 @property (nonatomic, assign) BOOL manualPause;
-@property (nonatomic, assign) NSUInteger readOffset;
 @property (nonatomic, assign) double duration;
 @property (nonatomic, assign) double sampleRate;
 @property (nonatomic, assign) NSUInteger channels;
@@ -1094,11 +1094,13 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) int64_t queuedFrames;
 @property (nonatomic, assign) int64_t completedFrames;
 @property (nonatomic, assign) int64_t seekTargetFrame;
-@property (nonatomic, assign) int64_t decodedFramesCursor;
 @property (nonatomic, assign) int64_t playbackGeneration;
 @property (nonatomic, assign) int64_t playbackAnchorFrame;
+@property (nonatomic, assign) int64_t currentByteOffset;
+@property (nonatomic, assign) int64_t streamLengthBytes;
 @property (nonatomic, assign) BOOL seekRequested;
 @property (nonatomic, assign) BOOL seekInProgress;
+@property (nonatomic, assign) NSUInteger rangeChunkSize;
 #if LX_HAS_LIBFLAC
 @property (nonatomic, assign) FLAC__StreamDecoder *decoder;
 #endif
@@ -1106,6 +1108,10 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 #if LX_HAS_LIBFLAC
 static FLAC__StreamDecoderReadStatus LXStreamingFlacReadCallback(const FLAC__StreamDecoder *decoder, FLAC__byte buffer[], size_t *bytes, void *client_data);
+static FLAC__StreamDecoderSeekStatus LXStreamingFlacSeekCallback(const FLAC__StreamDecoder *decoder, FLAC__uint64 absolute_byte_offset, void *client_data);
+static FLAC__StreamDecoderTellStatus LXStreamingFlacTellCallback(const FLAC__StreamDecoder *decoder, FLAC__uint64 *absolute_byte_offset, void *client_data);
+static FLAC__StreamDecoderLengthStatus LXStreamingFlacLengthCallback(const FLAC__StreamDecoder *decoder, FLAC__uint64 *stream_length, void *client_data);
+static FLAC__bool LXStreamingFlacEofCallback(const FLAC__StreamDecoder *decoder, void *client_data);
 static FLAC__StreamDecoderWriteStatus LXStreamingFlacWriteCallback(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 * const buffer[], void *client_data);
 static void LXStreamingFlacMetadataCallback(const FLAC__StreamDecoder *decoder, const FLAC__StreamMetadata *metadata, void *client_data);
 static void LXStreamingFlacErrorCallback(const FLAC__StreamDecoder *decoder, FLAC__StreamDecoderErrorStatus status, void *client_data);
@@ -1129,6 +1135,7 @@ RCT_EXPORT_MODULE();
     _startThresholdSeconds = 1.5;
     _maxBufferSeconds = 8.0;
     _pausedBufferSeconds = 2.0;
+    _rangeChunkSize = 262144;
     _currentVolume = 1.0f;
     _currentRate = 1.0f;
   }
@@ -1190,8 +1197,9 @@ RCT_EXPORT_MODULE();
 }
 
 - (void)resetStreamingState {
-  self.streamData = [NSMutableData data];
-  self.readOffset = 0;
+  self.requestHeaders = @{};
+  self.rangeChunkCache = [NSMutableDictionary dictionary];
+  self.fullStreamData = nil;
   self.streamError = nil;
   self.downloadCompleted = NO;
   self.stopRequested = NO;
@@ -1206,11 +1214,12 @@ RCT_EXPORT_MODULE();
   self.queuedFrames = 0;
   self.completedFrames = 0;
   self.seekTargetFrame = 0;
-  self.decodedFramesCursor = 0;
   self.seekRequested = NO;
   self.seekInProgress = NO;
   self.playbackGeneration += 1;
   self.playbackAnchorFrame = 0;
+  self.currentByteOffset = 0;
+  self.streamLengthBytes = 0;
   self.outputFormat = nil;
 }
 
@@ -1285,6 +1294,135 @@ RCT_EXPORT_MODULE();
   }
 }
 
+- (NSString *)headerValueForName:(NSString *)headerName response:(NSHTTPURLResponse *)response {
+  for (id key in response.allHeaderFields) {
+    if (![key isKindOfClass:[NSString class]]) continue;
+    if (![(NSString *)key caseInsensitiveCompare:headerName]) {
+      id value = response.allHeaderFields[key];
+      return [value isKindOfClass:[NSString class]] ? value : [value description];
+    }
+  }
+  return nil;
+}
+
+- (BOOL)parseContentRange:(NSString *)contentRange rangeStart:(int64_t *)rangeStart rangeEnd:(int64_t *)rangeEnd totalLength:(int64_t *)totalLength {
+  if (contentRange.length == 0) return NO;
+  NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)" options:0 error:nil];
+  NSTextCheckingResult *match = [regex firstMatchInString:contentRange options:0 range:NSMakeRange(0, contentRange.length)];
+  if (match.numberOfRanges != 4) return NO;
+
+  NSString *startString = [contentRange substringWithRange:[match rangeAtIndex:1]];
+  NSString *endString = [contentRange substringWithRange:[match rangeAtIndex:2]];
+  NSString *totalString = [contentRange substringWithRange:[match rangeAtIndex:3]];
+
+  if (rangeStart != NULL) *rangeStart = startString.longLongValue;
+  if (rangeEnd != NULL) *rangeEnd = endString.longLongValue;
+  if (totalLength != NULL) *totalLength = [totalString isEqualToString:@"*"] ? -1 : totalString.longLongValue;
+  return YES;
+}
+
+- (NSData *)performSynchronousRequest:(NSURLRequest *)request response:(NSHTTPURLResponse **)response error:(NSError **)error {
+  if (self.session == nil) {
+    NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    configuration.timeoutIntervalForRequest = 30;
+    configuration.timeoutIntervalForResource = 60;
+    self.session = [NSURLSession sessionWithConfiguration:configuration];
+  }
+
+  __block NSData *resultData = nil;
+  __block NSHTTPURLResponse *resultResponse = nil;
+  __block NSError *resultError = nil;
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  NSURLSessionDataTask *dataTask = [self.session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *rawResponse, NSError *requestError) {
+    resultData = data;
+    resultResponse = [rawResponse isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)rawResponse : nil;
+    resultError = requestError;
+    dispatch_semaphore_signal(semaphore);
+  }];
+  [dataTask resume];
+
+  while (dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC))) != 0) {
+    if (!self.stopRequested) continue;
+    [dataTask cancel];
+    if (error != NULL) *error = LXError(@"streaming_flac_http", @"Streaming FLAC request was cancelled");
+    return nil;
+  }
+
+  if (response != NULL) *response = resultResponse;
+  if (resultError != nil && error != NULL) *error = resultError;
+  return resultData;
+}
+
+- (void)trimRangeChunkCacheAroundByteOffset:(int64_t)byteOffset {
+  if (self.fullStreamData != nil || self.rangeChunkCache.count <= 18 || self.rangeChunkSize == 0) return;
+
+  long long centerIndex = byteOffset / (long long)self.rangeChunkSize;
+  NSMutableArray<NSNumber *> *keysToRemove = [NSMutableArray array];
+  for (NSNumber *key in self.rangeChunkCache.allKeys) {
+    long long chunkIndex = key.longLongValue;
+    if (llabs(chunkIndex - centerIndex) > 8) [keysToRemove addObject:key];
+  }
+  [self.rangeChunkCache removeObjectsForKeys:keysToRemove];
+}
+
+- (BOOL)fetchChunkAtIndex:(NSUInteger)chunkIndex error:(NSError **)error {
+  if (self.fullStreamData != nil) return YES;
+
+  NSNumber *cacheKey = @(chunkIndex);
+  if (self.rangeChunkCache[cacheKey] != nil) return YES;
+
+  int64_t start = (int64_t)chunkIndex * (int64_t)self.rangeChunkSize;
+  if (self.streamLengthBytes > 0 && start >= self.streamLengthBytes) return YES;
+
+  int64_t end = start + (int64_t)self.rangeChunkSize - 1;
+  if (self.streamLengthBytes > 0) end = MIN(end, self.streamLengthBytes - 1);
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:self.currentURL]];
+  for (NSString *key in self.requestHeaders) {
+    NSString *value = self.requestHeaders[key];
+    if (value.length) [request setValue:value forHTTPHeaderField:key];
+  }
+  [request setValue:[NSString stringWithFormat:@"bytes=%lld-%lld", start, end] forHTTPHeaderField:@"Range"];
+
+  NSHTTPURLResponse *response = nil;
+  NSData *data = [self performSynchronousRequest:request response:&response error:error];
+  if (data == nil || response == nil) return NO;
+
+  NSInteger statusCode = response.statusCode;
+  if (statusCode == 206) {
+    int64_t rangeStart = 0;
+    int64_t rangeEnd = 0;
+    int64_t totalLength = -1;
+    NSString *contentRange = [self headerValueForName:@"Content-Range" response:response];
+    if (![self parseContentRange:contentRange rangeStart:&rangeStart rangeEnd:&rangeEnd totalLength:&totalLength] || rangeStart != start || totalLength <= 0) {
+      if (error != NULL) *error = LXError(@"streaming_flac_range", @"Invalid HTTP range response");
+      return NO;
+    }
+    self.streamLengthBytes = totalLength;
+    self.rangeChunkCache[cacheKey] = data;
+    [self trimRangeChunkCacheAroundByteOffset:start];
+    return YES;
+  }
+
+  if (statusCode >= 200 && statusCode < 300 && start == 0) {
+    self.fullStreamData = data;
+    self.streamLengthBytes = response.expectedContentLength > 0 ? response.expectedContentLength : (int64_t)data.length;
+    self.downloadCompleted = YES;
+    return YES;
+  }
+
+  if (error != NULL) {
+    *error = LXError(@"streaming_flac_range", [NSString stringWithFormat:@"HTTP range request failed: %ld", (long)statusCode]);
+  }
+  return NO;
+}
+
+- (BOOL)prepareRangeSourceIfNeeded:(NSError **)error {
+  if (self.fullStreamData != nil || self.streamLengthBytes > 0 || self.rangeChunkCache[@0] != nil) return YES;
+  return [self fetchChunkAtIndex:0 error:error];
+}
+
 - (void)waitForBufferCapacityIfNeeded {
   while (!self.stopRequested && !self.seekRequested) {
     __block BOOL shouldWait = NO;
@@ -1301,28 +1439,16 @@ RCT_EXPORT_MODULE();
 
 #if LX_HAS_LIBFLAC
 - (void)applyPendingSeekIfNeeded {
-  if (!self.seekRequested || self.sampleRate <= 0) return;
+  if (!self.seekRequested || self.sampleRate <= 0 || self.decoder == NULL) return;
 
   double clampedPosition = self.duration > 0
     ? LXClampDouble(self.pendingSeekPosition, 0, self.duration)
     : MAX(self.pendingSeekPosition, 0);
-  int64_t targetFrame = (int64_t)llround(clampedPosition * self.sampleRate);
+  FLAC__uint64 targetSample = (FLAC__uint64)llround(clampedPosition * self.sampleRate);
 
   self.seekRequested = NO;
-  self.seekTargetFrame = MAX((int64_t)0, targetFrame);
-  self.seekInProgress = self.seekTargetFrame > 0;
-  self.decodedFramesCursor = 0;
-
-  [self.streamCondition lock];
-  self.readOffset = 0;
-  [self.streamCondition broadcast];
-  [self.streamCondition unlock];
-
-  if (self.decoder != NULL && !FLAC__stream_decoder_reset(self.decoder)) {
-    self.streamError = LXError(@"streaming_flac_seek", @"Failed to reset FLAC decoder for seek");
-    [self emitErrorMessage:self.streamError.localizedDescription];
-    return;
-  }
+  self.seekTargetFrame = (int64_t)targetSample;
+  self.seekInProgress = YES;
 
   dispatch_sync(self.renderQueue, ^{
     self.playbackGeneration += 1;
@@ -1333,6 +1459,13 @@ RCT_EXPORT_MODULE();
     self.lastKnownPosition = clampedPosition;
     self.playbackStarted = NO;
   });
+
+  if (!FLAC__stream_decoder_seek_absolute(self.decoder, targetSample)) {
+    self.seekInProgress = NO;
+    self.streamError = LXError(@"streaming_flac_seek", @"Failed to seek FLAC stream");
+    [self emitErrorMessage:self.streamError.localizedDescription];
+    return;
+  }
 }
 #endif
 
@@ -1398,6 +1531,13 @@ RCT_EXPORT_MODULE();
   [self emitErrorMessage:self.streamError.localizedDescription];
 #else
   dispatch_async(self.decoderQueue, ^{
+    NSError *sourceError = nil;
+    if (![self prepareRangeSourceIfNeeded:&sourceError]) {
+      self.streamError = sourceError ?: LXError(@"streaming_flac_http", @"Failed to prepare FLAC range source");
+      [self emitErrorMessage:self.streamError.localizedDescription];
+      return;
+    }
+
     self.decoder = FLAC__stream_decoder_new();
     if (self.decoder == NULL) {
       self.streamError = LXError(@"streaming_flac_decoder", @"Failed to create FLAC decoder");
@@ -1409,10 +1549,10 @@ RCT_EXPORT_MODULE();
     FLAC__StreamDecoderInitStatus initStatus = FLAC__stream_decoder_init_stream(
       self.decoder,
       LXStreamingFlacReadCallback,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
+      LXStreamingFlacSeekCallback,
+      LXStreamingFlacTellCallback,
+      LXStreamingFlacLengthCallback,
+      LXStreamingFlacEofCallback,
       LXStreamingFlacWriteCallback,
       LXStreamingFlacMetadataCallback,
       LXStreamingFlacErrorCallback,
@@ -1436,7 +1576,10 @@ RCT_EXPORT_MODULE();
         break;
       }
       [self waitForBufferCapacityIfNeeded];
-      if (FLAC__stream_decoder_get_state(self.decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) break;
+      if (FLAC__stream_decoder_get_state(self.decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) {
+        self.downloadCompleted = YES;
+        break;
+      }
     }
 
     FLAC__stream_decoder_finish(self.decoder);
@@ -1461,9 +1604,7 @@ RCT_EXPORT_MODULE();
   [self.streamCondition lock];
   [self.streamCondition broadcast];
   [self.streamCondition unlock];
-  [self.task cancel];
   [self.session invalidateAndCancel];
-  self.task = nil;
   self.session = nil;
   self.downloadCompleted = YES;
   if (resetAudio) {
@@ -1496,6 +1637,7 @@ RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDiction
     self.currentState = @"loading";
     self.currentVolume = [volume floatValue];
     self.currentRate = MAX([rate floatValue], 0.5f);
+    self.requestHeaders = [headers isKindOfClass:[NSDictionary class]] ? [headers copy] : @{};
     [self emitState:@"loading" position:@0 duration:@0];
 
     NSURL *url = [NSURL URLWithString:urlString];
@@ -1504,21 +1646,7 @@ RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDiction
       reject(@"streaming_flac_url", error.localizedDescription, error);
       return;
     }
-
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    if ([headers isKindOfClass:[NSDictionary class]]) {
-      for (NSString *key in headers) {
-        NSString *value = [headers[key] isKindOfClass:[NSString class]] ? headers[key] : nil;
-        if (value.length) [request setValue:value forHTTPHeaderField:key];
-      }
-    }
-
-    NSOperationQueue *delegateQueue = [[NSOperationQueue alloc] init];
-    delegateQueue.maxConcurrentOperationCount = 1;
-    self.session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration] delegate:self delegateQueue:delegateQueue];
-    self.task = [self.session dataTaskWithRequest:request];
     self.startThresholdSeconds = 1.5;
-    [self.task resume];
     [self startDecoderLoop];
     resolve(nil);
   });
@@ -1561,6 +1689,11 @@ RCT_REMAP_METHOD(reset, resetStreamWithResolver:(RCTPromiseResolveBlock)resolve 
 RCT_REMAP_METHOD(seekTo, seekToStream:(nonnull NSNumber *)position resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   if (self.currentURL.length == 0 || [self.currentState isEqualToString:@"idle"] || [self.currentState isEqualToString:@"stopped"]) {
     NSError *error = LXError(@"streaming_flac_seek", @"No streaming FLAC playback to seek");
+    reject(@"streaming_flac_seek", error.localizedDescription, error);
+    return;
+  }
+  if (self.decoder == NULL && self.sampleRate > 0) {
+    NSError *error = LXError(@"streaming_flac_seek", @"Streaming FLAC decoder is no longer active");
     reject(@"streaming_flac_seek", error.localizedDescription, error);
     return;
   }
@@ -1623,56 +1756,105 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
   resolve(self.currentState ?: @"idle");
 }
 
-- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition disposition))completionHandler {
-  completionHandler(NSURLSessionResponseAllow);
-}
-
-- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
-  if (self.stopRequested || !data.length) return;
-  [self.streamCondition lock];
-  [self.streamData appendData:data];
-  [self.streamCondition broadcast];
-  [self.streamCondition unlock];
-}
-
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-  [self.streamCondition lock];
-  if (error != nil && error.code != NSURLErrorCancelled) {
-    self.streamError = error;
-    [self emitErrorMessage:error.localizedDescription ?: @"FLAC stream download failed"];
-  }
-  self.downloadCompleted = YES;
-  [self.streamCondition broadcast];
-  [self.streamCondition unlock];
-}
-
 #if LX_HAS_LIBFLAC
 - (FLAC__StreamDecoderReadStatus)readBytes:(FLAC__byte *)buffer bytes:(size_t *)bytes {
-  [self.streamCondition lock];
-  while (!self.stopRequested) {
-    NSUInteger available = self.streamData.length > self.readOffset ? self.streamData.length - self.readOffset : 0;
-    if (available > 0) {
-      size_t requested = *bytes;
-      size_t count = MIN(requested, available);
-      memcpy(buffer, ((const FLAC__byte *)self.streamData.bytes) + self.readOffset, count);
-      self.readOffset += count;
-      *bytes = count;
-      [self.streamCondition unlock];
-      return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
-    }
-    if (self.streamError != nil) {
-      [self.streamCondition unlock];
-      return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
-    }
-    if (self.downloadCompleted) {
+  if (self.stopRequested) return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+
+  if (self.fullStreamData != nil) {
+    NSUInteger available = self.currentByteOffset < (int64_t)self.fullStreamData.length
+      ? (NSUInteger)((int64_t)self.fullStreamData.length - self.currentByteOffset)
+      : 0;
+    if (!available) {
       *bytes = 0;
-      [self.streamCondition unlock];
       return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
     }
-    [self.streamCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+    size_t count = MIN(*bytes, available);
+    memcpy(buffer, ((const FLAC__byte *)self.fullStreamData.bytes) + self.currentByteOffset, count);
+    self.currentByteOffset += (int64_t)count;
+    *bytes = count;
+    return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
   }
-  [self.streamCondition unlock];
-  return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+
+  NSError *sourceError = nil;
+  if (![self prepareRangeSourceIfNeeded:&sourceError]) {
+    self.streamError = sourceError ?: LXError(@"streaming_flac_http", @"Failed to prepare FLAC range source");
+    [self emitErrorMessage:self.streamError.localizedDescription];
+    return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+  }
+
+  if (self.streamLengthBytes > 0 && self.currentByteOffset >= self.streamLengthBytes) {
+    *bytes = 0;
+    return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
+  }
+
+  size_t requested = *bytes;
+  size_t copied = 0;
+  while (copied < requested && !self.stopRequested) {
+    if (self.streamLengthBytes > 0 && self.currentByteOffset >= self.streamLengthBytes) break;
+
+    NSUInteger chunkIndex = (NSUInteger)(self.currentByteOffset / (int64_t)self.rangeChunkSize);
+    if (![self fetchChunkAtIndex:chunkIndex error:&sourceError]) {
+      self.streamError = sourceError ?: LXError(@"streaming_flac_http", @"Failed to read FLAC range chunk");
+      [self emitErrorMessage:self.streamError.localizedDescription];
+      return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+    }
+
+    NSData *chunk = self.rangeChunkCache[@(chunkIndex)];
+    if (chunk.length == 0) break;
+
+    NSUInteger chunkOffset = (NSUInteger)(self.currentByteOffset - ((int64_t)chunkIndex * (int64_t)self.rangeChunkSize));
+    if (chunkOffset >= chunk.length) break;
+
+    size_t count = MIN(requested - copied, chunk.length - chunkOffset);
+    memcpy(buffer + copied, ((const FLAC__byte *)chunk.bytes) + chunkOffset, count);
+    copied += count;
+    self.currentByteOffset += (int64_t)count;
+  }
+
+  *bytes = copied;
+  if (copied > 0) return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+  return self.streamLengthBytes > 0 && self.currentByteOffset >= self.streamLengthBytes
+    ? FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM
+    : FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+}
+
+- (FLAC__StreamDecoderSeekStatus)seekToAbsoluteByteOffset:(FLAC__uint64)absoluteByteOffset {
+  NSError *sourceError = nil;
+  if (![self prepareRangeSourceIfNeeded:&sourceError]) {
+    self.streamError = sourceError ?: LXError(@"streaming_flac_seek", @"Failed to prepare FLAC seek source");
+    [self emitErrorMessage:self.streamError.localizedDescription];
+    return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
+  }
+
+  if (self.streamLengthBytes > 0 && absoluteByteOffset > (FLAC__uint64)self.streamLengthBytes) {
+    return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
+  }
+
+  self.currentByteOffset = (int64_t)absoluteByteOffset;
+  [self trimRangeChunkCacheAroundByteOffset:self.currentByteOffset];
+  return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
+}
+
+- (FLAC__StreamDecoderTellStatus)tellAbsoluteByteOffset:(FLAC__uint64 *)absoluteByteOffset {
+  if (absoluteByteOffset == NULL) return FLAC__STREAM_DECODER_TELL_STATUS_ERROR;
+  *absoluteByteOffset = (FLAC__uint64)MAX((int64_t)0, self.currentByteOffset);
+  return FLAC__STREAM_DECODER_TELL_STATUS_OK;
+}
+
+- (FLAC__StreamDecoderLengthStatus)getStreamLength:(FLAC__uint64 *)streamLength {
+  NSError *sourceError = nil;
+  if (![self prepareRangeSourceIfNeeded:&sourceError]) {
+    self.streamError = sourceError ?: LXError(@"streaming_flac_http", @"Failed to read FLAC stream length");
+    [self emitErrorMessage:self.streamError.localizedDescription];
+    return FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR;
+  }
+  if (streamLength == NULL || self.streamLengthBytes <= 0) return FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR;
+  *streamLength = (FLAC__uint64)self.streamLengthBytes;
+  return FLAC__STREAM_DECODER_LENGTH_STATUS_OK;
+}
+
+- (FLAC__bool)isAtEndOfStream {
+  return self.streamLengthBytes > 0 && self.currentByteOffset >= self.streamLengthBytes;
 }
 
 - (void)handleStreamInfo:(const FLAC__StreamMetadata_StreamInfo *)streamInfo {
@@ -1689,10 +1871,9 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
   if (self.streamError != nil) return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
 
   const NSUInteger blockSize = frame->header.blocksize;
-  const int64_t frameStart = self.decodedFramesCursor;
+  const int64_t frameStart = (int64_t)frame->header.number.sample_number;
   const int64_t frameEnd = frameStart + (int64_t)blockSize;
   NSUInteger startOffset = 0;
-  self.decodedFramesCursor = frameEnd;
 
   if (self.seekInProgress) {
     if (frameEnd <= self.seekTargetFrame) return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
@@ -1722,6 +1903,22 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
 #if LX_HAS_LIBFLAC
 static FLAC__StreamDecoderReadStatus LXStreamingFlacReadCallback(const FLAC__StreamDecoder *decoder, FLAC__byte buffer[], size_t *bytes, void *client_data) {
   return [(__bridge StreamingFlacPlayerModule *)client_data readBytes:buffer bytes:bytes];
+}
+
+static FLAC__StreamDecoderSeekStatus LXStreamingFlacSeekCallback(const FLAC__StreamDecoder *decoder, FLAC__uint64 absolute_byte_offset, void *client_data) {
+  return [(__bridge StreamingFlacPlayerModule *)client_data seekToAbsoluteByteOffset:absolute_byte_offset];
+}
+
+static FLAC__StreamDecoderTellStatus LXStreamingFlacTellCallback(const FLAC__StreamDecoder *decoder, FLAC__uint64 *absolute_byte_offset, void *client_data) {
+  return [(__bridge StreamingFlacPlayerModule *)client_data tellAbsoluteByteOffset:absolute_byte_offset];
+}
+
+static FLAC__StreamDecoderLengthStatus LXStreamingFlacLengthCallback(const FLAC__StreamDecoder *decoder, FLAC__uint64 *stream_length, void *client_data) {
+  return [(__bridge StreamingFlacPlayerModule *)client_data getStreamLength:stream_length];
+}
+
+static FLAC__bool LXStreamingFlacEofCallback(const FLAC__StreamDecoder *decoder, void *client_data) {
+  return [(__bridge StreamingFlacPlayerModule *)client_data isAtEndOfStream];
 }
 
 static FLAC__StreamDecoderWriteStatus LXStreamingFlacWriteCallback(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 * const buffer[], void *client_data) {

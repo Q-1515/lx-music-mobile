@@ -14,6 +14,7 @@ Pod::Spec.new do |s|
   s.source_files = [
     'lx_libflac_config.h',
     'include/FLAC/*.{h}',
+    'include/share/**/*.{h}',
     'src/include/private/*.{h}',
     'src/include/protected/*.{h}',
     'src/bitmath.c',
@@ -38,6 +39,7 @@ Pod::Spec.new do |s|
   s.preserve_paths = [
     'lx_libflac_config.h',
     'include/FLAC/*.h',
+    'include/share/**/*.{h}',
     'src/include/private/*.h',
     'src/include/protected/*.h',
   ]

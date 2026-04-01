@@ -1,5 +1,5 @@
 // import { useEffect, useState } from 'react'
-import { Platform, SafeAreaView, View } from 'react-native'
+import { Platform, SafeAreaView, StyleSheet, View } from 'react-native'
 import { useTheme } from '@/store/theme/hook'
 import ImageBackground from '@/components/common/ImageBackground'
 import { useWindowSize } from '@/utils/hooks'
@@ -67,9 +67,17 @@ export default ({ children }: Props) => {
           source={{ uri: pic!, headers: defaultHeaders }}
           resizeMode="cover"
           blurRadius={BLUR_RADIUS}
-        >
-          <View style={{ flex: 1, flexDirection: 'column', backgroundColor: theme['c-content-background'], opacity: 0.76 }}></View>
-        </ImageBackground>
+        />
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: theme['c-content-background'],
+              opacity: 0.76,
+            },
+          ]}
+        />
         <ContentContainer>
           <View style={{ flex: 1, flexDirection: 'column' }}>
             {children}

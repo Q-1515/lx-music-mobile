@@ -1085,11 +1085,20 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) NSUInteger channels;
 @property (nonatomic, assign) NSUInteger bitsPerSample;
 @property (nonatomic, assign) double startThresholdSeconds;
+@property (nonatomic, assign) double maxBufferSeconds;
+@property (nonatomic, assign) double pausedBufferSeconds;
 @property (nonatomic, assign) double lastKnownPosition;
+@property (nonatomic, assign) double pendingSeekPosition;
 @property (nonatomic, assign) float currentVolume;
 @property (nonatomic, assign) float currentRate;
 @property (nonatomic, assign) int64_t queuedFrames;
 @property (nonatomic, assign) int64_t completedFrames;
+@property (nonatomic, assign) int64_t seekTargetFrame;
+@property (nonatomic, assign) int64_t decodedFramesCursor;
+@property (nonatomic, assign) int64_t playbackGeneration;
+@property (nonatomic, assign) int64_t playbackAnchorFrame;
+@property (nonatomic, assign) BOOL seekRequested;
+@property (nonatomic, assign) BOOL seekInProgress;
 #if LX_HAS_LIBFLAC
 @property (nonatomic, assign) FLAC__StreamDecoder *decoder;
 #endif
@@ -1118,6 +1127,8 @@ RCT_EXPORT_MODULE();
     _renderQueue = dispatch_queue_create("cn.toside.music.mobile.streamingflac.render", DISPATCH_QUEUE_SERIAL);
     _currentState = @"idle";
     _startThresholdSeconds = 1.5;
+    _maxBufferSeconds = 8.0;
+    _pausedBufferSeconds = 2.0;
     _currentVolume = 1.0f;
     _currentRate = 1.0f;
   }
@@ -1191,8 +1202,15 @@ RCT_EXPORT_MODULE();
   self.channels = 0;
   self.bitsPerSample = 0;
   self.lastKnownPosition = 0;
+  self.pendingSeekPosition = 0;
   self.queuedFrames = 0;
   self.completedFrames = 0;
+  self.seekTargetFrame = 0;
+  self.decodedFramesCursor = 0;
+  self.seekRequested = NO;
+  self.seekInProgress = NO;
+  self.playbackGeneration += 1;
+  self.playbackAnchorFrame = 0;
   self.outputFormat = nil;
 }
 
@@ -1218,7 +1236,7 @@ RCT_EXPORT_MODULE();
     if (renderTime != nil) {
       AVAudioTime *playerTime = [self.playerNode playerTimeForNodeTime:renderTime];
       if (playerTime != nil) {
-        self.lastKnownPosition = MAX(0, (double)playerTime.sampleTime / self.sampleRate);
+        self.lastKnownPosition = MAX(0, (double)(self.playbackAnchorFrame + playerTime.sampleTime) / self.sampleRate);
       }
     }
   } else {
@@ -1268,45 +1286,103 @@ RCT_EXPORT_MODULE();
   }
 }
 
-- (void)schedulePCMBufferWithFrame:(const FLAC__Frame *)frame buffer:(const FLAC__int32 * const[])decodedBuffer {
+- (void)waitForBufferCapacityIfNeeded {
+  while (!self.stopRequested && !self.seekRequested) {
+    __block BOOL shouldWait = NO;
+    dispatch_sync(self.renderQueue, ^{
+      if (self.playerNode == nil || self.sampleRate <= 0) return;
+      double queuedSeconds = (double)self.queuedFrames / self.sampleRate;
+      double limit = self.manualPause ? self.pausedBufferSeconds : self.maxBufferSeconds;
+      shouldWait = limit > 0 && queuedSeconds >= limit;
+    });
+    if (!shouldWait) break;
+    [NSThread sleepForTimeInterval:0.03];
+  }
+}
+
+#if LX_HAS_LIBFLAC
+- (void)applyPendingSeekIfNeeded {
+  if (!self.seekRequested || self.sampleRate <= 0) return;
+
+  double clampedPosition = self.duration > 0
+    ? LXClampDouble(self.pendingSeekPosition, 0, self.duration)
+    : MAX(self.pendingSeekPosition, 0);
+  int64_t targetFrame = (int64_t)llround(clampedPosition * self.sampleRate);
+
+  self.seekRequested = NO;
+  self.seekTargetFrame = MAX((int64_t)0, targetFrame);
+  self.seekInProgress = self.seekTargetFrame > 0;
+  self.decodedFramesCursor = 0;
+
+  [self.streamCondition lock];
+  self.readOffset = 0;
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+
+  if (self.decoder != NULL && !FLAC__stream_decoder_reset(self.decoder)) {
+    self.streamError = LXError(@"streaming_flac_seek", @"Failed to reset FLAC decoder for seek");
+    [self emitErrorMessage:self.streamError.localizedDescription];
+    return;
+  }
+
+  dispatch_sync(self.renderQueue, ^{
+    self.playbackGeneration += 1;
+    if (self.playerNode != nil) [self.playerNode stop];
+    self.queuedFrames = 0;
+    self.completedFrames = self.seekTargetFrame;
+    self.playbackAnchorFrame = self.seekTargetFrame;
+    self.lastKnownPosition = clampedPosition;
+    self.playbackStarted = NO;
+  });
+}
+#endif
+
+- (void)schedulePCMBufferWithFrame:(const FLAC__Frame *)frame buffer:(const FLAC__int32 * const[])decodedBuffer startOffset:(NSUInteger)startOffset {
   if (self.outputFormat == nil || self.streamError != nil) return;
 
   const NSUInteger blockSize = frame->header.blocksize;
-  AVAudioPCMBuffer *pcmBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:self.outputFormat frameCapacity:(AVAudioFrameCount)blockSize];
+  if (startOffset >= blockSize) return;
+
+  const NSUInteger playableFrames = blockSize - startOffset;
+  AVAudioPCMBuffer *pcmBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:self.outputFormat frameCapacity:(AVAudioFrameCount)playableFrames];
   if (pcmBuffer == nil) {
     self.streamError = LXError(@"streaming_flac_buffer", @"Failed to allocate PCM buffer");
     return;
   }
 
-  pcmBuffer.frameLength = (AVAudioFrameCount)blockSize;
+  pcmBuffer.frameLength = (AVAudioFrameCount)playableFrames;
   const int shift = self.bitsPerSample <= 16 ? (int)(16 - self.bitsPerSample) : (int)(32 - self.bitsPerSample);
 
   if (self.outputFormat.commonFormat == AVAudioPCMFormatInt16) {
     int16_t *const *channels = pcmBuffer.int16ChannelData;
     for (NSUInteger channel = 0; channel < self.channels; channel++) {
-      for (NSUInteger sample = 0; sample < blockSize; sample++) {
-        FLAC__int32 value = decodedBuffer[channel][sample];
+      for (NSUInteger sample = 0; sample < playableFrames; sample++) {
+        FLAC__int32 value = decodedBuffer[channel][sample + startOffset];
         channels[channel][sample] = (int16_t)(shift > 0 ? (value << shift) : value);
       }
     }
   } else {
     int32_t *const *channels = pcmBuffer.int32ChannelData;
     for (NSUInteger channel = 0; channel < self.channels; channel++) {
-      for (NSUInteger sample = 0; sample < blockSize; sample++) {
-        FLAC__int32 value = decodedBuffer[channel][sample];
+      for (NSUInteger sample = 0; sample < playableFrames; sample++) {
+        FLAC__int32 value = decodedBuffer[channel][sample + startOffset];
         channels[channel][sample] = shift > 0 ? (value << shift) : value;
       }
     }
   }
 
+  const int64_t queuedFrameCount = (int64_t)playableFrames;
+  __block int64_t generation = 0;
   dispatch_sync(self.renderQueue, ^{
     if (self.playerNode == nil || self.stopRequested) return;
 
-    self.queuedFrames += (int64_t)blockSize;
+    generation = self.playbackGeneration;
+    self.queuedFrames += queuedFrameCount;
     [self.playerNode scheduleBuffer:pcmBuffer completionCallbackType:AVAudioPlayerNodeCompletionDataPlayedBack completionHandler:^(AVAudioPlayerNodeCompletionCallbackType callbackType) {
       dispatch_async(self.renderQueue, ^{
-        self.completedFrames += (int64_t)blockSize;
-        self.queuedFrames = MAX(0, self.queuedFrames - (int64_t)blockSize);
+        if (generation != self.playbackGeneration) return;
+        self.completedFrames += queuedFrameCount;
+        self.queuedFrames = MAX(0, self.queuedFrames - queuedFrameCount);
         self.lastKnownPosition = self.sampleRate > 0 ? (double)self.completedFrames / self.sampleRate : self.lastKnownPosition;
         if (self.downloadCompleted && self.queuedFrames == 0 && !self.stopRequested) {
           self.playbackStarted = NO;
@@ -1361,6 +1437,7 @@ RCT_EXPORT_MODULE();
     }
 
     while (!self.stopRequested) {
+      [self applyPendingSeekIfNeeded];
       if (!FLAC__stream_decoder_process_single(self.decoder)) {
         if (self.streamError == nil) {
           self.streamError = LXError(@"streaming_flac_decode", @"FLAC decoder failed during processing");
@@ -1368,6 +1445,7 @@ RCT_EXPORT_MODULE();
         }
         break;
       }
+      [self waitForBufferCapacityIfNeeded];
       if (FLAC__stream_decoder_get_state(self.decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) break;
     }
 
@@ -1401,6 +1479,7 @@ RCT_EXPORT_MODULE();
   if (resetAudio) {
     dispatch_sync(self.renderQueue, ^{
       self.lastKnownPosition = [self currentPlaybackPositionLocked];
+      self.playbackGeneration += 1;
       [self cleanupAudioGraphLocked];
     });
   }
@@ -1490,8 +1569,36 @@ RCT_REMAP_METHOD(reset, resetStreamWithResolver:(RCTPromiseResolveBlock)resolve 
 }
 
 RCT_REMAP_METHOD(seekTo, seekToStream:(nonnull NSNumber *)position resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
-  NSError *error = LXError(@"streaming_flac_seek", @"Streaming FLAC seek is not implemented yet");
-  reject(@"streaming_flac_seek", error.localizedDescription, error);
+  if (self.currentURL.length == 0 || [self.currentState isEqualToString:@"idle"] || [self.currentState isEqualToString:@"stopped"]) {
+    NSError *error = LXError(@"streaming_flac_seek", @"No streaming FLAC playback to seek");
+    reject(@"streaming_flac_seek", error.localizedDescription, error);
+    return;
+  }
+
+  double requestedPosition = MAX([position doubleValue], 0);
+  if (self.duration > 0) requestedPosition = LXClampDouble(requestedPosition, 0, self.duration);
+
+  dispatch_sync(self.renderQueue, ^{
+    self.lastKnownPosition = requestedPosition;
+    self.playbackGeneration += 1;
+    if (self.playerNode != nil) [self.playerNode stop];
+    self.queuedFrames = 0;
+    self.completedFrames = self.sampleRate > 0 ? (int64_t)llround(requestedPosition * self.sampleRate) : 0;
+    self.playbackAnchorFrame = self.completedFrames;
+    self.playbackStarted = NO;
+  });
+
+  self.pendingSeekPosition = requestedPosition;
+  self.seekRequested = YES;
+  self.seekInProgress = self.sampleRate > 0 && requestedPosition > 0;
+  self.currentState = self.manualPause ? @"paused" : @"buffering";
+
+  [self.streamCondition lock];
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+
+  [self emitState:self.currentState position:@(requestedPosition) duration:@(self.duration)];
+  resolve(@(requestedPosition));
 }
 
 RCT_REMAP_METHOD(setVolume, setStreamVolume:(nonnull NSNumber *)volume resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
@@ -1559,10 +1666,6 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
       size_t count = MIN(requested, available);
       memcpy(buffer, ((const FLAC__byte *)self.streamData.bytes) + self.readOffset, count);
       self.readOffset += count;
-      if (self.readOffset > 262144 && self.readOffset > self.streamData.length / 2) {
-        [self.streamData replaceBytesInRange:NSMakeRange(0, self.readOffset) withBytes:NULL length:0];
-        self.readOffset = 0;
-      }
       *bytes = count;
       [self.streamCondition unlock];
       return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
@@ -1594,7 +1697,23 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
 
 - (FLAC__StreamDecoderWriteStatus)handleFrame:(const FLAC__Frame *)frame buffer:(const FLAC__int32 * const[])decodedBuffer {
   if (self.streamError != nil) return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
-  [self schedulePCMBufferWithFrame:frame buffer:decodedBuffer];
+
+  const NSUInteger blockSize = frame->header.blocksize;
+  const int64_t frameStart = self.decodedFramesCursor;
+  const int64_t frameEnd = frameStart + (int64_t)blockSize;
+  NSUInteger startOffset = 0;
+  self.decodedFramesCursor = frameEnd;
+
+  if (self.seekInProgress) {
+    if (frameEnd <= self.seekTargetFrame) return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+    if (self.seekTargetFrame > frameStart) startOffset = (NSUInteger)(self.seekTargetFrame - frameStart);
+    self.seekInProgress = NO;
+  }
+
+  [self waitForBufferCapacityIfNeeded];
+  if (self.stopRequested || self.seekRequested) return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+
+  [self schedulePCMBufferWithFrame:frame buffer:decodedBuffer startOffset:startOffset];
   return self.streamError == nil ? FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE : FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
 }
 

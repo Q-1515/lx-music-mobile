@@ -2,6 +2,22 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native'
 import { downloadFile, existsFile, mkdir, temporaryDirectoryPath, unlink } from '@/utils/fs'
 import { stringMd5 } from 'react-native-quick-md5'
 import settingState from '@/store/setting/state'
+import {
+  getStreamingFlacDuration,
+  getStreamingFlacPosition,
+  getStreamingFlacState,
+  isStreamingFlacSupported,
+  onStreamingFlacEvent,
+  openStreamingFlac,
+  pauseStreamingFlac,
+  resetStreamingFlac,
+  resumeStreamingFlac,
+  setStreamingFlacRate,
+  setStreamingFlacVolume,
+  seekStreamingFlac,
+  stopStreamingFlac,
+  type StreamingFlacEvent,
+} from '@/utils/nativeModules/streamingFlac'
 
 type NativeFlacState = 'idle' | 'loading' | 'playing' | 'paused' | 'stopped'
 
@@ -41,15 +57,28 @@ const cacheDir = `${temporaryDirectoryPath}/NativeFlacPlayer`
 const downloadingMap = new Map<string, Promise<string>>()
 const preferredPreciseQualities = new Set<LX.Quality>(['flac', 'flac24bit'])
 const retryDelay = 800
+const defaultUserAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile'
 
 let currentTrackId = ''
 let currentState: NativeFlacState = 'idle'
+let currentMode: 'none' | 'file' | 'stream' = 'none'
+let currentMusicInfo: LX.Player.PlayMusic | null = null
+let currentUrl = ''
+
+const clearCurrentContext = (nextState: NativeFlacState) => {
+  currentTrackId = ''
+  currentMode = 'none'
+  currentMusicInfo = null
+  currentUrl = ''
+  currentState = nextState
+}
 
 const normalizePath = (path: string) => path.startsWith('file://')
   ? decodeURIComponent(path.replace(/^file:\/\//, ''))
   : decodeURIComponent(path)
 
 const getMusicInfo = (musicInfo: LX.Player.PlayMusic) => 'progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo
+const isRemoteUrl = (url: string) => /^https?:\/\//i.test(url)
 
 const getQualityExt = (musicInfo: LX.Player.PlayMusic, url: string) => {
   const info = getMusicInfo(musicInfo)
@@ -96,7 +125,7 @@ const downloadToCache = async(url: string, cachePath: string, retry = 1): Promis
 }
 
 const ensurePlayablePath = async(musicInfo: LX.Player.PlayMusic, url: string, forceRedownload = false) => {
-  if (!/^https?:\/\//i.test(url)) return normalizePath(url)
+  if (!isRemoteUrl(url)) return normalizePath(url)
 
   await ensureCacheDir()
   const cachePath = buildCachePath(musicInfo, url)
@@ -122,7 +151,7 @@ const playNativeFile = async(path: string, position: number) => {
   })
 }
 
-export const isNativeFlacPlayerAvailable = () => Platform.OS == 'ios' && !!NativeFlacPlayer
+export const isNativeFlacPlayerAvailable = () => Platform.OS == 'ios' && (!!NativeFlacPlayer || isStreamingFlacSupported)
 
 export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: string) => {
   if (!isNativeFlacPlayerAvailable()) return false
@@ -138,21 +167,45 @@ export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: s
 }
 
 export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number) => {
+  const nextTrackId = `nativeflac://${getMusicInfo(musicInfo).id}`
+  currentMusicInfo = musicInfo
+  currentUrl = url
+
+  if (isRemoteUrl(url) && isStreamingFlacSupported && position <= 0) {
+    currentTrackId = nextTrackId
+    currentMode = 'stream'
+    currentState = 'loading'
+    try {
+      await openStreamingFlac(url, { 'User-Agent': defaultUserAgent }, settingState.setting['player.volume'], settingState.setting['player.playbackRate'])
+      return {
+        position: 0,
+        duration: 0,
+        path: url,
+        trackId: nextTrackId,
+      }
+    } catch (err) {
+      currentTrackId = ''
+      currentMode = 'none'
+      currentState = 'idle'
+      throw err
+    }
+  }
+
   if (!NativeFlacPlayer) throw new Error('Native flac player is unavailable')
   let path = await ensurePlayablePath(musicInfo, url)
-  const nextTrackId = `nativeflac://${getMusicInfo(musicInfo).id}`
   currentState = 'loading'
   let info
   try {
     info = await playNativeFile(path, position)
   } catch (err) {
-    if (/^https?:\/\//i.test(url)) {
+    if (isRemoteUrl(url)) {
       await unlink(path).catch(() => {})
       path = await ensurePlayablePath(musicInfo, url, true)
       info = await playNativeFile(path, position)
     } else throw err
   }
   currentTrackId = nextTrackId
+  currentMode = 'file'
   currentState = 'playing'
   return {
     ...info,
@@ -162,61 +215,116 @@ export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url
 }
 
 export const pauseNativeFlacPlayback = async() => {
-  if (!NativeFlacPlayer || !currentTrackId) return
-  await NativeFlacPlayer.pause()
+  if (!currentTrackId) return
+  if (currentMode == 'stream') {
+    await pauseStreamingFlac().catch(() => {})
+  } else if (NativeFlacPlayer) {
+    await NativeFlacPlayer.pause()
+  }
   currentState = 'paused'
 }
 
 export const resumeNativeFlacPlayback = async() => {
-  if (!NativeFlacPlayer || !currentTrackId) return
-  await NativeFlacPlayer.resume()
+  if (!currentTrackId) return
+  if (currentMode == 'stream') {
+    await resumeStreamingFlac().catch(() => {})
+  } else if (NativeFlacPlayer) {
+    await NativeFlacPlayer.resume()
+  }
   currentState = 'playing'
 }
 
 export const stopNativeFlacPlayback = async(reset = false) => {
-  if (!NativeFlacPlayer || !currentTrackId) return
+  if (!currentTrackId) return
   const trackId = currentTrackId
-  if (reset) await NativeFlacPlayer.reset()
-  else await NativeFlacPlayer.stop()
-  if (currentTrackId == trackId) currentTrackId = ''
-  currentState = reset ? 'idle' : 'stopped'
+  const mode = currentMode
+  if (currentMode == 'stream') {
+    if (reset) await resetStreamingFlac().catch(() => {})
+    else await stopStreamingFlac().catch(() => {})
+  } else if (NativeFlacPlayer) {
+    if (reset) await NativeFlacPlayer.reset()
+    else await NativeFlacPlayer.stop()
+  }
+  if (currentTrackId == trackId && currentMode == mode) clearCurrentContext(reset ? 'idle' : 'stopped')
 }
 
 export const resetNativeFlacPlayback = async() => {
-  if (!NativeFlacPlayer) return
-  await NativeFlacPlayer.reset()
-  currentTrackId = ''
-  currentState = 'idle'
+  const mode = currentMode
+  if (currentMode == 'stream') {
+    await resetStreamingFlac().catch(() => {})
+  } else if (NativeFlacPlayer) {
+    await NativeFlacPlayer.reset()
+  }
+  if (currentMode == mode) clearCurrentContext('idle')
 }
 
 export const seekNativeFlacPlayback = async(position: number) => {
+  if (!currentTrackId) return position
+  if (currentMode == 'stream') {
+    try {
+      return await seekStreamingFlac(position)
+    } catch (err) {
+      if (!currentMusicInfo || !currentUrl || !NativeFlacPlayer) return getStreamingFlacPosition().catch(() => position)
+      const mode = currentMode
+      const currentPosition = await getStreamingFlacPosition().catch(() => position)
+      const shouldResume = (await getStreamingFlacState().catch(() => currentState)) == 'playing'
+      await stopStreamingFlac().catch(() => {})
+      const path = await ensurePlayablePath(currentMusicInfo, currentUrl)
+      const info = await playNativeFile(path, position)
+      if (currentMode == mode) {
+        currentMode = 'file'
+        currentState = 'playing'
+      }
+      if (!shouldResume) await pauseNativeFlacPlayback()
+      return shouldResume ? info.position : currentPosition
+    }
+  }
   if (!NativeFlacPlayer) return position
   return NativeFlacPlayer.seekTo(position)
 }
 
 export const getNativeFlacPosition = async() => {
-  if (!NativeFlacPlayer || !currentTrackId) return 0
+  if (!currentTrackId) return 0
+  if (currentMode == 'stream') return getStreamingFlacPosition().catch(() => 0)
+  if (!NativeFlacPlayer) return 0
   return NativeFlacPlayer.getPosition()
 }
 
 export const getNativeFlacDuration = async() => {
-  if (!NativeFlacPlayer || !currentTrackId) return 0
+  if (!currentTrackId) return 0
+  if (currentMode == 'stream') return getStreamingFlacDuration().catch(() => 0)
+  if (!NativeFlacPlayer) return 0
   return NativeFlacPlayer.getDuration()
 }
 
 export const getNativeFlacState = async() => {
-  if (!NativeFlacPlayer || !currentTrackId) return currentState
+  if (!currentTrackId) return currentState
+  if (currentMode == 'stream') {
+    currentState = await getStreamingFlacState().catch(() => currentState)
+    return currentState
+  }
+  if (!NativeFlacPlayer) return currentState
   currentState = await NativeFlacPlayer.getState()
   return currentState
 }
 
 export const setNativeFlacVolume = async(volume: number) => {
-  if (!NativeFlacPlayer || !currentTrackId) return
+  if (!currentTrackId) return
+  if (currentMode == 'stream') {
+    await setStreamingFlacVolume(volume).catch(() => {})
+    return
+  }
+  if (!NativeFlacPlayer) return
   await NativeFlacPlayer.setVolume(volume)
 }
 
 export const setNativeFlacRate = async(rate: number) => {
-  if (!NativeFlacPlayer || !currentTrackId) return
+  if (!currentTrackId) return
+  if (currentMode == 'stream') {
+    await setStreamingFlacRate(rate).catch(() => {})
+    return
+  }
+  if (!NativeFlacPlayer) return
   await NativeFlacPlayer.setRate(rate)
 }
 
@@ -225,23 +333,74 @@ export const isNativeFlacActive = () => !!currentTrackId
 export const getNativeFlacTrackId = () => currentTrackId
 
 export const onNativeFlacPlayerEvent = (listener: (event: NativeFlacEvent) => void) => {
-  if (!eventEmitter) return () => {}
-  const subscription = eventEmitter.addListener('flac-player-event', (event: NativeFlacEvent) => {
+  const subscriptions: Array<() => void> = []
+
+  if (eventEmitter) {
+    const subscription = eventEmitter.addListener('flac-player-event', (event: NativeFlacEvent) => {
+      if (currentMode != 'file') return
+      switch (event.type) {
+        case 'state':
+          currentState = event.state
+          break
+        case 'ended':
+          currentState = 'stopped'
+          currentTrackId = ''
+          currentMode = 'none'
+          currentMusicInfo = null
+          currentUrl = ''
+          break
+        case 'error':
+          currentState = 'paused'
+          break
+      }
+      listener(event)
+    })
+    subscriptions.push(() => {
+      subscription.remove()
+    })
+  }
+
+  const removeStreaming = onStreamingFlacEvent((event: StreamingFlacEvent) => {
+    if (currentMode != 'stream') return
     switch (event.type) {
       case 'state':
-        currentState = event.state
+        currentState = event.state == 'buffering' ? 'loading' : event.state
+        listener({
+          type: 'state',
+          state: currentState,
+          position: event.position,
+          duration: event.duration,
+        })
         break
       case 'ended':
         currentState = 'stopped'
         currentTrackId = ''
+        currentMode = 'none'
+        currentMusicInfo = null
+        currentUrl = ''
+        listener({
+          type: 'ended',
+          state: 'stopped',
+          position: event.position,
+          duration: event.duration,
+          success: true,
+        })
         break
       case 'error':
         currentState = 'paused'
+        listener({
+          type: 'error',
+          message: event.message,
+          state: 'paused',
+          position: event.position,
+          duration: event.duration,
+        })
         break
     }
-    listener(event)
   })
+  subscriptions.push(removeStreaming)
+
   return () => {
-    subscription.remove()
+    for (const remove of subscriptions) remove()
   }
 }

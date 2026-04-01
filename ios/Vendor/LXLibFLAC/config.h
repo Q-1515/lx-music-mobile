@@ -1,0 +1,44 @@
+#ifndef LX_LIBFLAC_CONFIG_H
+#define LX_LIBFLAC_CONFIG_H
+
+#define CPU_IS_BIG_ENDIAN 0
+#define FLAC__CPU_ARM64 1
+#define ENABLE_64_BIT_WORDS 1
+#define FLAC__HAS_OGG 0
+#define FLAC__HAS_X86INTRIN 0
+#define FLAC__HAS_NEONINTRIN 1
+#define FLAC__HAS_A64NEONINTRIN 1
+#define FLAC__SYS_DARWIN 1
+#define HAVE_BSWAP16 1
+#define HAVE_BSWAP32 1
+#define HAVE_INTTYPES_H 1
+#define HAVE_LROUND 1
+#define HAVE_MEMORY_H 1
+#define HAVE_STDINT_H 1
+#define HAVE_STDLIB_H 1
+#define HAVE_STRING_H 1
+#define HAVE_SYS_PARAM_H 1
+#define HAVE_SYS_STAT_H 1
+#define HAVE_SYS_TIME_H 1
+#define HAVE_SYS_TYPES_H 1
+#define HAVE_TYPEOF 1
+#define HAVE_UNISTD_H 1
+#define FLAC__NO_ASM 1
+#define PACKAGE_VERSION "1.5.0"
+#define SIZEOF_OFF_T 8
+#define SIZEOF_VOIDP 8
+#define WORDS_BIGENDIAN CPU_IS_BIG_ENDIAN
+
+#ifndef _DARWIN_USE_64_BIT_INODE
+#define _DARWIN_USE_64_BIT_INODE 1
+#endif
+
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+
+#ifndef _LARGEFILE_SOURCE
+#define _LARGEFILE_SOURCE
+#endif
+
+#endif

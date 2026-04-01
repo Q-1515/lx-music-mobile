@@ -11,6 +11,13 @@
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <math.h>
 
+#if __has_include(<FLAC/stream_decoder.h>)
+#import <FLAC/stream_decoder.h>
+#define LX_HAS_LIBFLAC 1
+#else
+#define LX_HAS_LIBFLAC 0
+#endif
+
 static NSData *LXBase64Decode(NSString *value) {
   if (value == nil) return [NSData data];
   return [[NSData alloc] initWithBase64EncodedString:value options:NSDataBase64DecodingIgnoreUnknownCharacters] ?: [NSData data];
@@ -1058,6 +1065,581 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 }
 
 @end
+
+@interface StreamingFlacPlayerModule : RCTEventEmitter<RCTBridgeModule, NSURLSessionDataDelegate>
+@property (nonatomic, strong) NSURLSession *session;
+@property (nonatomic, strong) NSURLSessionDataTask *task;
+@property (nonatomic, strong) NSMutableData *streamData;
+@property (nonatomic, strong) NSCondition *streamCondition;
+@property (nonatomic, strong) dispatch_queue_t decoderQueue;
+@property (nonatomic, strong) dispatch_queue_t renderQueue;
+@property (nonatomic, strong) AVAudioEngine *engine;
+@property (nonatomic, strong) AVAudioPlayerNode *playerNode;
+@property (nonatomic, strong) AVAudioUnitTimePitch *timePitchNode;
+@property (nonatomic, strong) AVAudioFormat *outputFormat;
+@property (nonatomic, copy) NSString *currentState;
+@property (nonatomic, copy) NSString *currentURL;
+@property (nonatomic, strong) NSError *streamError;
+@property (nonatomic, assign) BOOL hasListeners;
+@property (nonatomic, assign) BOOL downloadCompleted;
+@property (nonatomic, assign) BOOL stopRequested;
+@property (nonatomic, assign) BOOL playbackStarted;
+@property (nonatomic, assign) BOOL manualPause;
+@property (nonatomic, assign) NSUInteger readOffset;
+@property (nonatomic, assign) double duration;
+@property (nonatomic, assign) double sampleRate;
+@property (nonatomic, assign) NSUInteger channels;
+@property (nonatomic, assign) NSUInteger bitsPerSample;
+@property (nonatomic, assign) double startThresholdSeconds;
+@property (nonatomic, assign) double lastKnownPosition;
+@property (nonatomic, assign) float currentVolume;
+@property (nonatomic, assign) float currentRate;
+@property (nonatomic, assign) int64_t queuedFrames;
+@property (nonatomic, assign) int64_t completedFrames;
+#if LX_HAS_LIBFLAC
+@property (nonatomic, assign) FLAC__StreamDecoder *decoder;
+#endif
+@end
+
+#if LX_HAS_LIBFLAC
+static FLAC__StreamDecoderReadStatus LXStreamingFlacReadCallback(const FLAC__StreamDecoder *decoder, FLAC__byte buffer[], size_t *bytes, void *client_data);
+static FLAC__StreamDecoderWriteStatus LXStreamingFlacWriteCallback(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 * const buffer[], void *client_data);
+static void LXStreamingFlacMetadataCallback(const FLAC__StreamDecoder *decoder, const FLAC__StreamMetadata *metadata, void *client_data);
+static void LXStreamingFlacErrorCallback(const FLAC__StreamDecoder *decoder, FLAC__StreamDecoderErrorStatus status, void *client_data);
+#endif
+
+@implementation StreamingFlacPlayerModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return YES;
+}
+
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _streamCondition = [[NSCondition alloc] init];
+    _decoderQueue = dispatch_queue_create("cn.toside.music.mobile.streamingflac.decoder", DISPATCH_QUEUE_SERIAL);
+    _renderQueue = dispatch_queue_create("cn.toside.music.mobile.streamingflac.render", DISPATCH_QUEUE_SERIAL);
+    _currentState = @"idle";
+    _startThresholdSeconds = 1.5;
+    _currentVolume = 1.0f;
+    _currentRate = 1.0f;
+  }
+  return self;
+}
+
+- (NSArray<NSString *> *)supportedEvents {
+  return @[ @"streaming-flac-event" ];
+}
+
+- (void)startObserving {
+  self.hasListeners = YES;
+}
+
+- (void)stopObserving {
+  self.hasListeners = NO;
+}
+
+- (void)emitEventWithType:(NSString *)type body:(NSDictionary *)body {
+  if (!self.hasListeners) return;
+  NSMutableDictionary *payload = body != nil ? [body mutableCopy] : [NSMutableDictionary dictionary];
+  payload[@"type"] = type ?: @"state";
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self sendEventWithName:@"streaming-flac-event" body:payload];
+  });
+}
+
+- (void)emitState:(NSString *)state position:(NSNumber *)position duration:(NSNumber *)duration {
+  self.currentState = state ?: @"idle";
+  [self emitEventWithType:@"state" body:@{
+    @"state": self.currentState,
+    @"position": position ?: @(self.lastKnownPosition),
+    @"duration": duration ?: @(self.duration),
+  }];
+}
+
+- (void)emitErrorMessage:(NSString *)message {
+  [self emitEventWithType:@"error" body:@{
+    @"message": message ?: @"Unknown streaming flac error",
+    @"state": self.currentState ?: @"idle",
+    @"position": @(self.lastKnownPosition),
+    @"duration": @(self.duration),
+  }];
+}
+
+- (BOOL)prepareAudioSession:(NSError **)error {
+  AVAudioSession *session = [AVAudioSession sharedInstance];
+  if (@available(iOS 13.0, *)) {
+    if (![session setCategory:AVAudioSessionCategoryPlayback
+                      mode:AVAudioSessionModeDefault
+        routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongFormAudio
+                   options:0
+                     error:error]) return NO;
+  } else if (@available(iOS 11.0, *)) {
+    if (![session setCategory:AVAudioSessionCategoryPlayback
+                      mode:AVAudioSessionModeDefault
+        routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongForm
+                   options:0
+                     error:error]) return NO;
+  } else {
+    if (![session setCategory:AVAudioSessionCategoryPlayback error:error]) return NO;
+  }
+  if (![session setActive:YES error:error]) return NO;
+  return YES;
+}
+
+- (void)resetStreamingState {
+  self.streamData = [NSMutableData data];
+  self.readOffset = 0;
+  self.streamError = nil;
+  self.downloadCompleted = NO;
+  self.stopRequested = NO;
+  self.playbackStarted = NO;
+  self.manualPause = NO;
+  self.duration = 0;
+  self.sampleRate = 0;
+  self.channels = 0;
+  self.bitsPerSample = 0;
+  self.lastKnownPosition = 0;
+  self.queuedFrames = 0;
+  self.completedFrames = 0;
+  self.outputFormat = nil;
+}
+
+- (void)cleanupAudioGraphLocked {
+  if (self.playerNode != nil) {
+    [self.playerNode stop];
+  }
+  if (self.engine != nil) {
+    [self.engine stop];
+    if (self.playerNode != nil) [self.engine detachNode:self.playerNode];
+    if (self.timePitchNode != nil) [self.engine detachNode:self.timePitchNode];
+  }
+  self.playerNode = nil;
+  self.timePitchNode = nil;
+  self.engine = nil;
+  self.outputFormat = nil;
+}
+
+- (double)currentPlaybackPositionLocked {
+  if (self.sampleRate <= 0) return self.lastKnownPosition;
+  if (self.playerNode != nil && self.playerNode.isPlaying) {
+    AVAudioTime *renderTime = self.playerNode.lastRenderTime;
+    if (renderTime != nil) {
+      AVAudioTime *playerTime = [self.playerNode playerTimeForNodeTime:renderTime];
+      if (playerTime != nil) {
+        self.lastKnownPosition = MAX(0, (double)playerTime.sampleTime / self.sampleRate);
+      }
+    }
+  } else {
+    self.lastKnownPosition = MAX(self.lastKnownPosition, self.sampleRate > 0 ? (double)self.completedFrames / self.sampleRate : self.lastKnownPosition);
+  }
+  return self.lastKnownPosition;
+}
+
+- (void)configureAudioGraphWithSampleRate:(double)sampleRate channels:(NSUInteger)channels bitsPerSample:(NSUInteger)bitsPerSample {
+  dispatch_sync(self.renderQueue, ^{
+    if (self.engine != nil) return;
+
+    AVAudioCommonFormat commonFormat = bitsPerSample <= 16 ? AVAudioPCMFormatInt16 : AVAudioPCMFormatInt32;
+    self.outputFormat = [[AVAudioFormat alloc] initWithCommonFormat:commonFormat
+                                                         sampleRate:sampleRate
+                                                           channels:(AVAudioChannelCount)channels
+                                                        interleaved:NO];
+    self.engine = [[AVAudioEngine alloc] init];
+    self.playerNode = [[AVAudioPlayerNode alloc] init];
+    self.timePitchNode = [[AVAudioUnitTimePitch alloc] init];
+    self.timePitchNode.rate = self.currentRate;
+    [self.engine attachNode:self.playerNode];
+    [self.engine attachNode:self.timePitchNode];
+    [self.engine connect:self.playerNode to:self.timePitchNode format:self.outputFormat];
+    [self.engine connect:self.timePitchNode to:self.engine.mainMixerNode format:self.outputFormat];
+    self.playerNode.volume = self.currentVolume;
+    [self.engine prepare];
+
+    NSError *error = nil;
+    if (![self.engine startAndReturnError:&error]) {
+      self.streamError = error ?: LXError(@"streaming_flac_engine", @"Failed to start AVAudioEngine");
+    }
+  });
+
+  if (self.streamError != nil) {
+    [self emitErrorMessage:self.streamError.localizedDescription ?: @"Failed to start AVAudioEngine"];
+  }
+}
+
+- (void)maybeStartPlaybackLocked {
+  if (self.manualPause || self.playerNode == nil || self.sampleRate <= 0) return;
+  double queuedSeconds = (double)self.queuedFrames / self.sampleRate;
+  if (!self.playbackStarted && (queuedSeconds >= self.startThresholdSeconds || (self.downloadCompleted && self.queuedFrames > 0))) {
+    [self.playerNode play];
+    self.playbackStarted = YES;
+    [self emitState:@"playing" position:@(self.lastKnownPosition) duration:@(self.duration)];
+  }
+}
+
+- (void)schedulePCMBufferWithFrame:(const FLAC__Frame *)frame buffer:(const FLAC__int32 * const[])decodedBuffer {
+  if (self.outputFormat == nil || self.streamError != nil) return;
+
+  const NSUInteger blockSize = frame->header.blocksize;
+  AVAudioPCMBuffer *pcmBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:self.outputFormat frameCapacity:(AVAudioFrameCount)blockSize];
+  if (pcmBuffer == nil) {
+    self.streamError = LXError(@"streaming_flac_buffer", @"Failed to allocate PCM buffer");
+    return;
+  }
+
+  pcmBuffer.frameLength = (AVAudioFrameCount)blockSize;
+  const int shift = self.bitsPerSample <= 16 ? (int)(16 - self.bitsPerSample) : (int)(32 - self.bitsPerSample);
+
+  if (self.outputFormat.commonFormat == AVAudioPCMFormatInt16) {
+    int16_t **channels = pcmBuffer.int16ChannelData;
+    for (NSUInteger channel = 0; channel < self.channels; channel++) {
+      for (NSUInteger sample = 0; sample < blockSize; sample++) {
+        FLAC__int32 value = decodedBuffer[channel][sample];
+        channels[channel][sample] = (int16_t)(shift > 0 ? (value << shift) : value);
+      }
+    }
+  } else {
+    int32_t **channels = pcmBuffer.int32ChannelData;
+    for (NSUInteger channel = 0; channel < self.channels; channel++) {
+      for (NSUInteger sample = 0; sample < blockSize; sample++) {
+        FLAC__int32 value = decodedBuffer[channel][sample];
+        channels[channel][sample] = shift > 0 ? (value << shift) : value;
+      }
+    }
+  }
+
+  dispatch_sync(self.renderQueue, ^{
+    if (self.playerNode == nil || self.stopRequested) return;
+
+    self.queuedFrames += (int64_t)blockSize;
+    [self.playerNode scheduleBuffer:pcmBuffer completionCallbackType:AVAudioPlayerNodeCompletionDataPlayedBack completionHandler:^(AVAudioPlayerNodeCompletionCallbackType callbackType) {
+      dispatch_async(self.renderQueue, ^{
+        self.completedFrames += (int64_t)blockSize;
+        self.queuedFrames = MAX(0, self.queuedFrames - (int64_t)blockSize);
+        self.lastKnownPosition = self.sampleRate > 0 ? (double)self.completedFrames / self.sampleRate : self.lastKnownPosition;
+        if (self.downloadCompleted && self.queuedFrames == 0 && !self.stopRequested) {
+          self.playbackStarted = NO;
+          [self emitEventWithType:@"ended" body:@{
+            @"state": @"stopped",
+            @"position": @(self.lastKnownPosition),
+            @"duration": @(self.duration),
+          }];
+        } else if (!self.downloadCompleted && self.playbackStarted && self.sampleRate > 0 && ((double)self.queuedFrames / self.sampleRate) < 0.15) {
+          [self.playerNode pause];
+          self.playbackStarted = NO;
+          [self emitState:@"buffering" position:@(self.lastKnownPosition) duration:@(self.duration)];
+        }
+      });
+    }];
+    [self maybeStartPlaybackLocked];
+  });
+}
+
+- (void)startDecoderLoop {
+#if !LX_HAS_LIBFLAC
+  self.streamError = LXError(@"streaming_flac_decoder", @"libFLAC is not available");
+  [self emitErrorMessage:self.streamError.localizedDescription];
+#else
+  dispatch_async(self.decoderQueue, ^{
+    self.decoder = FLAC__stream_decoder_new();
+    if (self.decoder == NULL) {
+      self.streamError = LXError(@"streaming_flac_decoder", @"Failed to create FLAC decoder");
+      [self emitErrorMessage:self.streamError.localizedDescription];
+      return;
+    }
+
+    FLAC__stream_decoder_set_md5_checking(self.decoder, false);
+    FLAC__StreamDecoderInitStatus initStatus = FLAC__stream_decoder_init_stream(
+      self.decoder,
+      LXStreamingFlacReadCallback,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      LXStreamingFlacWriteCallback,
+      LXStreamingFlacMetadataCallback,
+      LXStreamingFlacErrorCallback,
+      (__bridge void *)self
+    );
+    if (initStatus != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
+      self.streamError = LXError(@"streaming_flac_init", [NSString stringWithFormat:@"FLAC decoder init failed: %d", initStatus]);
+      [self emitErrorMessage:self.streamError.localizedDescription];
+      FLAC__stream_decoder_delete(self.decoder);
+      self.decoder = NULL;
+      return;
+    }
+
+    while (!self.stopRequested) {
+      if (!FLAC__stream_decoder_process_single(self.decoder)) {
+        if (self.streamError == nil) {
+          self.streamError = LXError(@"streaming_flac_decode", @"FLAC decoder failed during processing");
+          [self emitErrorMessage:self.streamError.localizedDescription];
+        }
+        break;
+      }
+      if (FLAC__stream_decoder_get_state(self.decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) break;
+    }
+
+    FLAC__stream_decoder_finish(self.decoder);
+    FLAC__stream_decoder_delete(self.decoder);
+    self.decoder = NULL;
+
+    dispatch_async(self.renderQueue, ^{
+      if (self.downloadCompleted && self.queuedFrames == 0 && !self.stopRequested) {
+        [self emitEventWithType:@"ended" body:@{
+          @"state": @"stopped",
+          @"position": @(self.lastKnownPosition),
+          @"duration": @(self.duration),
+        }];
+      }
+    });
+  });
+#endif
+}
+
+- (void)stopStreamingInternal:(BOOL)resetAudio {
+  self.stopRequested = YES;
+  [self.streamCondition lock];
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+  [self.task cancel];
+  [self.session invalidateAndCancel];
+  self.task = nil;
+  self.session = nil;
+  self.downloadCompleted = YES;
+  if (resetAudio) {
+    dispatch_sync(self.renderQueue, ^{
+      self.lastKnownPosition = [self currentPlaybackPositionLocked];
+      [self cleanupAudioGraphLocked];
+    });
+  }
+}
+
+RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDictionary *)headers volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (![urlString isKindOfClass:[NSString class]] || urlString.length == 0) {
+      NSError *error = LXError(@"streaming_flac_url", @"Missing FLAC stream url");
+      reject(@"streaming_flac_url", error.localizedDescription, error);
+      return;
+    }
+
+    NSError *sessionError = nil;
+    if (![self prepareAudioSession:&sessionError]) {
+      [self emitErrorMessage:sessionError.localizedDescription ?: @"Failed to activate audio session"];
+      reject(@"streaming_flac_session", sessionError.localizedDescription ?: @"Failed to activate audio session", sessionError);
+      return;
+    }
+
+    [self stopStreamingInternal:YES];
+    [self resetStreamingState];
+    self.currentURL = urlString;
+    self.currentState = @"loading";
+    self.currentVolume = [volume floatValue];
+    self.currentRate = MAX([rate floatValue], 0.5f);
+    [self emitState:@"loading" position:@0 duration:@0];
+
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (url == nil) {
+      NSError *error = LXError(@"streaming_flac_url", @"Invalid FLAC stream url");
+      reject(@"streaming_flac_url", error.localizedDescription, error);
+      return;
+    }
+
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    if ([headers isKindOfClass:[NSDictionary class]]) {
+      for (NSString *key in headers) {
+        NSString *value = [headers[key] isKindOfClass:[NSString class]] ? headers[key] : nil;
+        if (value.length) [request setValue:value forHTTPHeaderField:key];
+      }
+    }
+
+    NSOperationQueue *delegateQueue = [[NSOperationQueue alloc] init];
+    delegateQueue.maxConcurrentOperationCount = 1;
+    self.session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration] delegate:self delegateQueue:delegateQueue];
+    self.task = [self.session dataTaskWithRequest:request];
+    self.startThresholdSeconds = 1.5;
+    [self.task resume];
+    [self startDecoderLoop];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(resume, resumeStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_sync(self.renderQueue, ^{
+    self.manualPause = NO;
+    [self maybeStartPlaybackLocked];
+  });
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(pause, pauseStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_sync(self.renderQueue, ^{
+    self.lastKnownPosition = [self currentPlaybackPositionLocked];
+    self.manualPause = YES;
+    [self.playerNode pause];
+    self.playbackStarted = NO;
+  });
+  [self emitState:@"paused" position:@(self.lastKnownPosition) duration:@(self.duration)];
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(stop, stopStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  [self stopStreamingInternal:YES];
+  self.currentState = @"stopped";
+  [self emitState:@"stopped" position:@0 duration:@(self.duration)];
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(reset, resetStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  [self stopStreamingInternal:YES];
+  [self resetStreamingState];
+  self.currentState = @"idle";
+  [self emitState:@"idle" position:@0 duration:@0];
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(seekTo, seekToStream:(nonnull NSNumber *)position resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSError *error = LXError(@"streaming_flac_seek", @"Streaming FLAC seek is not implemented yet");
+  reject(@"streaming_flac_seek", error.localizedDescription, error);
+}
+
+RCT_REMAP_METHOD(setVolume, setStreamVolume:(nonnull NSNumber *)volume resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  self.currentVolume = [volume floatValue];
+  dispatch_sync(self.renderQueue, ^{
+    if (self.playerNode != nil) self.playerNode.volume = self.currentVolume;
+  });
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(setRate, setStreamRate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  self.currentRate = MAX([rate floatValue], 0.5f);
+  dispatch_sync(self.renderQueue, ^{
+    if (self.timePitchNode != nil) self.timePitchNode.rate = self.currentRate;
+  });
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(getPosition, getStreamPositionWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  __block double position = 0;
+  dispatch_sync(self.renderQueue, ^{
+    position = [self currentPlaybackPositionLocked];
+  });
+  resolve(@(position));
+}
+
+RCT_REMAP_METHOD(getDuration, getStreamDurationWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  resolve(@(self.duration));
+}
+
+RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  resolve(self.currentState ?: @"idle");
+}
+
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition disposition))completionHandler {
+  completionHandler(NSURLSessionResponseAllow);
+}
+
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
+  if (self.stopRequested || !data.length) return;
+  [self.streamCondition lock];
+  [self.streamData appendData:data];
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+}
+
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+  [self.streamCondition lock];
+  if (error != nil && error.code != NSURLErrorCancelled) {
+    self.streamError = error;
+    [self emitErrorMessage:error.localizedDescription ?: @"FLAC stream download failed"];
+  }
+  self.downloadCompleted = YES;
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+}
+
+#if LX_HAS_LIBFLAC
+- (FLAC__StreamDecoderReadStatus)readBytes:(FLAC__byte *)buffer bytes:(size_t *)bytes {
+  [self.streamCondition lock];
+  while (!self.stopRequested) {
+    NSUInteger available = self.streamData.length > self.readOffset ? self.streamData.length - self.readOffset : 0;
+    if (available > 0) {
+      size_t requested = *bytes;
+      size_t count = MIN(requested, available);
+      memcpy(buffer, ((const FLAC__byte *)self.streamData.bytes) + self.readOffset, count);
+      self.readOffset += count;
+      if (self.readOffset > 262144 && self.readOffset > self.streamData.length / 2) {
+        [self.streamData replaceBytesInRange:NSMakeRange(0, self.readOffset) withBytes:NULL length:0];
+        self.readOffset = 0;
+      }
+      *bytes = count;
+      [self.streamCondition unlock];
+      return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+    }
+    if (self.streamError != nil) {
+      [self.streamCondition unlock];
+      return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+    }
+    if (self.downloadCompleted) {
+      *bytes = 0;
+      [self.streamCondition unlock];
+      return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
+    }
+    [self.streamCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+  }
+  [self.streamCondition unlock];
+  return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+}
+
+- (void)handleStreamInfo:(const FLAC__StreamMetadata_StreamInfo *)streamInfo {
+  self.sampleRate = streamInfo->sample_rate;
+  self.channels = streamInfo->channels;
+  self.bitsPerSample = streamInfo->bits_per_sample;
+  self.duration = streamInfo->total_samples > 0 && streamInfo->sample_rate > 0
+    ? (double)streamInfo->total_samples / streamInfo->sample_rate
+    : 0;
+  [self configureAudioGraphWithSampleRate:self.sampleRate channels:self.channels bitsPerSample:self.bitsPerSample];
+}
+
+- (FLAC__StreamDecoderWriteStatus)handleFrame:(const FLAC__Frame *)frame buffer:(const FLAC__int32 * const[])decodedBuffer {
+  if (self.streamError != nil) return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+  [self schedulePCMBufferWithFrame:frame buffer:decodedBuffer];
+  return self.streamError == nil ? FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE : FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+}
+
+- (void)handleDecoderErrorStatus:(FLAC__StreamDecoderErrorStatus)status {
+  if (self.stopRequested) return;
+  self.streamError = LXError(@"streaming_flac_decode", [NSString stringWithFormat:@"FLAC decoder error: %d", status]);
+  [self emitErrorMessage:self.streamError.localizedDescription];
+  [self.streamCondition lock];
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+}
+#endif
+
+@end
+
+#if LX_HAS_LIBFLAC
+static FLAC__StreamDecoderReadStatus LXStreamingFlacReadCallback(const FLAC__StreamDecoder *decoder, FLAC__byte buffer[], size_t *bytes, void *client_data) {
+  return [(__bridge StreamingFlacPlayerModule *)client_data readBytes:buffer bytes:bytes];
+}
+
+static FLAC__StreamDecoderWriteStatus LXStreamingFlacWriteCallback(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 * const buffer[], void *client_data) {
+  return [(__bridge StreamingFlacPlayerModule *)client_data handleFrame:frame buffer:buffer];
+}
+
+static void LXStreamingFlacMetadataCallback(const FLAC__StreamDecoder *decoder, const FLAC__StreamMetadata *metadata, void *client_data) {
+  if (metadata->type != FLAC__METADATA_TYPE_STREAMINFO) return;
+  [(__bridge StreamingFlacPlayerModule *)client_data handleStreamInfo:&metadata->data.stream_info];
+}
+
+static void LXStreamingFlacErrorCallback(const FLAC__StreamDecoder *decoder, FLAC__StreamDecoderErrorStatus status, void *client_data) {
+  [(__bridge StreamingFlacPlayerModule *)client_data handleDecoderErrorStatus:status];
+}
+#endif
 
 @interface FilePickerModule : NSObject<RCTBridgeModule, UIDocumentPickerDelegate>
 @property (nonatomic, copy) RCTPromiseResolveBlock pickerResolve;

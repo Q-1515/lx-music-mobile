@@ -84,6 +84,8 @@ end
 target 'LxMusicMobile' do
   config = use_native_modules!
 
+  pod 'LXLibFLAC', :path => './Vendor/LXLibFLAC'
+
   use_react_native!(
     :path => config[:reactNativePath],
     # Enables Flipper.

@@ -35,9 +35,7 @@
 
 #include "FLAC/ordinals.h"
 
-#ifdef HAVE_CONFIG_H
 #include "lx_libflac_config.h"
-#endif
 
 #ifndef FLAC__CPU_X86_64
 

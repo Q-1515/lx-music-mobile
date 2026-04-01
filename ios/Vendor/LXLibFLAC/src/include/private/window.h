@@ -33,9 +33,7 @@
 #ifndef FLAC__PRIVATE__WINDOW_H
 #define FLAC__PRIVATE__WINDOW_H
 
-#ifdef HAVE_CONFIG_H
 #include "lx_libflac_config.h"
-#endif
 
 #include "private/float.h"
 #include "FLAC/format.h"

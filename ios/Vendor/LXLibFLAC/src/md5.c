@@ -1,6 +1,4 @@
-#ifdef HAVE_CONFIG_H
 #include "lx_libflac_config.h"
-#endif
 
 #include <stdlib.h>		/* for malloc() */
 #include <string.h>		/* for memcpy() */

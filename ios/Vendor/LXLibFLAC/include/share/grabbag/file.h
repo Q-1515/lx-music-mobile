@@ -25,9 +25,7 @@
 #define GRABAG__FILE_H
 
 /* needed because of off_t */
-#ifdef HAVE_CONFIG_H
-#  include "lx_libflac_config.h"
-#endif
+#include "lx_libflac_config.h"
 
 #include <sys/types.h> /* for off_t */
 #include <stdio.h> /* for FILE */

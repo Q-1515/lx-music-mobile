@@ -33,9 +33,7 @@
 #ifndef FLAC__PRIVATE__LPC_H
 #define FLAC__PRIVATE__LPC_H
 
-#ifdef HAVE_CONFIG_H
 #include "lx_libflac_config.h"
-#endif
 
 #include "private/cpu.h"
 #include "private/float.h"

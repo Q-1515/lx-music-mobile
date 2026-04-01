@@ -1,5 +1,5 @@
-/* libFLAC - Free Lossless Audio Codec
- * Copyright (C) 2004-2009  Josh Coalson
+/* alloc - Convenience routines for safely allocating memory
+ * Copyright (C) 2007-2009  Josh Coalson
  * Copyright (C) 2011-2025  Xiph.Org Foundation
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,17 +30,19 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "lx_libflac_config.h"
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 
-#include "private/ogg_mapping.h"
+#include <stdlib.h>
 
-const uint32_t FLAC__OGG_MAPPING_PACKET_TYPE_LEN = 8; /* bits */
+#include "share/alloc.h"
 
-const FLAC__byte FLAC__OGG_MAPPING_FIRST_HEADER_PACKET_TYPE = 0x7f;
-
-const FLAC__byte * const FLAC__OGG_MAPPING_MAGIC = (const FLAC__byte * const)"FLAC";
-
-const uint32_t FLAC__OGG_MAPPING_VERSION_MAJOR_LEN = 8; /* bits */
-const uint32_t FLAC__OGG_MAPPING_VERSION_MINOR_LEN = 8; /* bits */
-
-const uint32_t FLAC__OGG_MAPPING_NUM_HEADERS_LEN = 16; /* bits */
+void *safe_malloc_mul_2op_(size_t size1, size_t size2)
+{
+	if(!size1 || !size2)
+		return malloc(1); /* malloc(0) is undefined; FLAC src convention is to always allocate */
+	if(size1 > SIZE_MAX / size2)
+		return 0;
+	return malloc(size1*size2);
+}

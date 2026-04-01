@@ -33,9 +33,7 @@
 #ifndef FLAC__PRIVATE__STREAM_ENCODER_H
 #define FLAC__PRIVATE__STREAM_ENCODER_H
 
-#ifdef HAVE_CONFIG_H
 #include "lx_libflac_config.h"
-#endif
 
 /*
  * This is used to avoid overflow with unusual signals in 32-bit

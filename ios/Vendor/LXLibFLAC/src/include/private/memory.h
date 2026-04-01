@@ -33,9 +33,7 @@
 #ifndef FLAC__PRIVATE__MEMORY_H
 #define FLAC__PRIVATE__MEMORY_H
 
-#ifdef HAVE_CONFIG_H
 #include "lx_libflac_config.h"
-#endif
 
 #include <stdlib.h> /* for size_t */
 

@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
   s.requires_arc = false
 
   s.source_files = [
-    'config.h',
+    'lx_libflac_config.h',
     'include/FLAC/*.{h}',
     'src/include/private/*.{h}',
     'src/include/protected/*.{h}',
@@ -36,7 +36,7 @@ Pod::Spec.new do |s|
   s.public_header_files = 'include/FLAC/*.h'
   s.header_mappings_dir = 'include'
   s.preserve_paths = [
-    'config.h',
+    'lx_libflac_config.h',
     'include/FLAC/*.h',
     'src/include/private/*.h',
     'src/include/protected/*.h',

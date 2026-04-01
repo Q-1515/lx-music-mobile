@@ -34,7 +34,7 @@
 #define FLAC__PRIVATE__FIXED_H
 
 #ifdef HAVE_CONFIG_H
-#include <config.h>
+#include "lx_libflac_config.h"
 #endif
 
 #include "private/cpu.h"

@@ -25,6 +25,13 @@ if linkage != nil
   use_frameworks! :linkage => linkage.to_sym
 end
 
+def lx_build_libflac_xcframework
+  script = File.join(__dir__, 'Vendor', 'LXLibFLAC', 'build_xcframework.sh')
+  Pod::UI.puts 'Building LXLibFLAC xcframework...'.green
+  success = system('bash', script)
+  raise 'Failed to build LXLibFLAC xcframework' unless success
+end
+
 def lx_patch_swift_audio_seek(installer)
   wrapper_path = Dir.glob(File.join(installer.sandbox.root.to_s, '**', 'AVPlayerWrapper.swift'))
     .find { |file| file.include?('SwiftAudioEx') || file.include?('SwiftAudio') }
@@ -84,6 +91,7 @@ end
 target 'LxMusicMobile' do
   config = use_native_modules!
 
+  lx_build_libflac_xcframework
   pod 'LXLibFLAC', :path => './Vendor/LXLibFLAC'
 
   use_react_native!(

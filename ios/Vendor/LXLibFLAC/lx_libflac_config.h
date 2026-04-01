@@ -11,6 +11,7 @@
 #define FLAC__SYS_DARWIN 1
 #define HAVE_BSWAP16 1
 #define HAVE_BSWAP32 1
+#define HAVE_FSEEKO 1
 #define HAVE_INTTYPES_H 1
 #define HAVE_LROUND 1
 #define HAVE_MEMORY_H 1

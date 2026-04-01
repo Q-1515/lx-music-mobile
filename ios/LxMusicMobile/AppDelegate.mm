@@ -855,12 +855,6 @@ RCT_EXPORT_MODULE();
         routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongFormAudio
                    options:0
                      error:error]) return NO;
-  } else if (@available(iOS 11.0, *)) {
-    if (![session setCategory:AVAudioSessionCategoryPlayback
-                      mode:AVAudioSessionModeDefault
-        routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongForm
-                   options:0
-                     error:error]) return NO;
   } else {
     if (![session setCategory:AVAudioSessionCategoryPlayback error:error]) return NO;
   }
@@ -1177,12 +1171,6 @@ RCT_EXPORT_MODULE();
         routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongFormAudio
                    options:0
                      error:error]) return NO;
-  } else if (@available(iOS 11.0, *)) {
-    if (![session setCategory:AVAudioSessionCategoryPlayback
-                      mode:AVAudioSessionModeDefault
-        routeSharingPolicy:AVAudioSessionRouteSharingPolicyLongForm
-                   options:0
-                     error:error]) return NO;
   } else {
     if (![session setCategory:AVAudioSessionCategoryPlayback error:error]) return NO;
   }
@@ -1294,7 +1282,7 @@ RCT_EXPORT_MODULE();
   const int shift = self.bitsPerSample <= 16 ? (int)(16 - self.bitsPerSample) : (int)(32 - self.bitsPerSample);
 
   if (self.outputFormat.commonFormat == AVAudioPCMFormatInt16) {
-    int16_t **channels = pcmBuffer.int16ChannelData;
+    int16_t *const *channels = pcmBuffer.int16ChannelData;
     for (NSUInteger channel = 0; channel < self.channels; channel++) {
       for (NSUInteger sample = 0; sample < blockSize; sample++) {
         FLAC__int32 value = decodedBuffer[channel][sample];
@@ -1302,7 +1290,7 @@ RCT_EXPORT_MODULE();
       }
     }
   } else {
-    int32_t **channels = pcmBuffer.int32ChannelData;
+    int32_t *const *channels = pcmBuffer.int32ChannelData;
     for (NSUInteger channel = 0; channel < self.channels; channel++) {
       for (NSUInteger sample = 0; sample < blockSize; sample++) {
         FLAC__int32 value = decodedBuffer[channel][sample];

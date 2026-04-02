@@ -1,17 +1,64 @@
 import { useEffect, useState } from 'react'
+import { Platform } from 'react-native'
 import BackgroundTimer from 'react-native-background-timer'
 import { exitApp } from '@/core/common'
+import { pause } from '@/core/player/player'
 import playerState from '@/store/player/state'
 import settingState from '@/store/setting/state'
+import {
+  isSmartSleepCloseSupported,
+  markSmartSleepCloseInteraction,
+  onSmartSleepCloseEvent,
+  startSmartSleepCloseMonitoring,
+  stopSmartSleepCloseMonitoring,
+  type SmartSleepCloseState,
+} from '@/utils/nativeModules/smartSleepClose'
+import { toast } from '@/utils/tools'
 
-type Hook = (time: number, isPlayedStop: boolean) => void
+type TimeoutMode = 'off' | 'timer' | 'smart'
+
+export interface TimeoutExitInfo {
+  time: number
+  isPlayedStop: boolean
+  mode: TimeoutMode
+  smartState: SmartSleepCloseState
+  active: boolean
+}
+
+type Hook = (info: TimeoutExitInfo) => void
+
+interface TimeoutToolsSnapshot {
+  getTime: () => number
+  mode: TimeoutMode
+  smartState: SmartSleepCloseState
+}
+
+const SMART_SLEEP_CLOSE_OPTIONS = {
+  inactivityThresholdSeconds: 10 * 60,
+  motionWindowSeconds: 5 * 60,
+  prewarmSeconds: 5 * 60,
+  checkIntervalSeconds: 5,
+  sampleIntervalSeconds: 1,
+} as const
+
+const createInfo = (tools: TimeoutToolsSnapshot): TimeoutExitInfo => ({
+  time: tools.getTime(),
+  isPlayedStop: global.lx.isPlayedStop,
+  mode: tools.mode,
+  smartState: tools.smartState,
+  active: tools.mode == 'smart' || tools.getTime() >= 0,
+})
 
 const timeoutTools = {
   bgTimeout: null as number | null,
   timeout: null as NodeJS.Timer | null,
   startTime: 0,
   time: -1,
+  mode: 'off' as TimeoutMode,
+  smartState: 'idle' as SmartSleepCloseState,
   timeHooks: [] as Hook[],
+  smartEventSubscribed: false,
+  lifecycleBound: false,
   exit() {
     if (settingState.setting['player.timeoutExitPlayed'] && playerState.isPlay) {
       global.lx.isPlayedStop = true
@@ -24,47 +71,144 @@ const timeoutTools = {
     return Math.max(this.time - Math.round((performance.now() - this.startTime) / 1000), -1)
   },
   callHooks() {
-    const time = this.getTime()
+    const info = createInfo(this)
     for (const hook of this.timeHooks) {
-      hook(time, global.lx.isPlayedStop)
+      hook(info)
     }
   },
-  clearTimeout() {
-    if (!this.bgTimeout) return
-    BackgroundTimer.clearTimeout(this.bgTimeout)
-    clearInterval(this.timeout!)
-    this.bgTimeout = null
-    this.timeout = null
+  clearTimer(resetMode = true) {
+    if (this.bgTimeout) {
+      BackgroundTimer.clearTimeout(this.bgTimeout)
+      this.bgTimeout = null
+    }
+    if (this.timeout) {
+      clearInterval(this.timeout)
+      this.timeout = null
+    }
     this.time = -1
+    if (resetMode && this.mode == 'timer') this.mode = 'off'
     this.callHooks()
   },
   start(time: number) {
-    this.clearTimeout()
+    this.stopSmart(false)
+    this.clearTimer(false)
+    this.mode = 'timer'
     this.time = time
     this.startTime = performance.now()
     this.bgTimeout = BackgroundTimer.setTimeout(() => {
-      this.clearTimeout()
+      this.clearTimer()
       this.exit()
     }, time * 1000)
     this.timeout = setInterval(() => {
       this.callHooks()
     }, 1000)
+    this.callHooks()
+  },
+  async startSmartNative() {
+    if (Platform.OS != 'ios' || !isSmartSleepCloseSupported()) return
+    await startSmartSleepCloseMonitoring(SMART_SLEEP_CLOSE_OPTIONS)
+  },
+  async stopSmartNative() {
+    if (Platform.OS != 'ios' || !isSmartSleepCloseSupported()) return
+    await stopSmartSleepCloseMonitoring().catch(() => {})
+  },
+  startSmart() {
+    global.lx.isPlayedStop = false
+    this.clearTimer()
+    this.mode = 'smart'
+    this.smartState = 'waiting_inactive'
+    this.bindSmartEvents()
+    this.bindLifecycleEvents()
+    if (playerState.isPlay) {
+      void this.startSmartNative().then(() => {
+        void markSmartSleepCloseInteraction().catch(() => {})
+      })
+    }
+    this.callHooks()
+  },
+  stopSmart(resetMode = true) {
+    void this.stopSmartNative()
+    if (resetMode) this.mode = 'off'
+    this.smartState = 'idle'
+    this.callHooks()
+  },
+  markInteraction() {
+    if (this.mode != 'smart') return
+    this.smartState = 'waiting_inactive'
+    this.callHooks()
+    if (!playerState.isPlay) return
+    void markSmartSleepCloseInteraction().catch(() => {})
+  },
+  handlePlay() {
+    if (this.mode != 'smart') return
+    this.smartState = 'waiting_inactive'
+    this.callHooks()
+    void this.startSmartNative().then(() => {
+      void markSmartSleepCloseInteraction().catch(() => {})
+    })
+  },
+  handlePauseLike() {
+    if (this.mode != 'smart') return
+    void this.stopSmartNative()
+    this.smartState = 'waiting_inactive'
+    this.callHooks()
+  },
+  bindSmartEvents() {
+    if (this.smartEventSubscribed || Platform.OS != 'ios' || !isSmartSleepCloseSupported()) return
+    onSmartSleepCloseEvent((event) => {
+      if (this.mode != 'smart') return
+      switch (event.type) {
+        case 'state':
+          this.smartState = event.state
+          this.callHooks()
+          break
+        case 'triggered':
+          this.mode = 'off'
+          this.smartState = 'triggered'
+          this.callHooks()
+          toast(global.i18n.t('timeout_exit_tip_smart_triggered'))
+          void pause().catch(() => {})
+          this.smartState = 'idle'
+          this.callHooks()
+          break
+        case 'error':
+          this.stopSmart()
+          break
+      }
+    })
+    this.smartEventSubscribed = true
+  },
+  bindLifecycleEvents() {
+    if (this.lifecycleBound) return
+    global.app_event.on('play', () => { this.handlePlay() })
+    global.app_event.on('pause', () => { this.handlePauseLike() })
+    global.app_event.on('stop', () => { this.handlePauseLike() })
+    global.app_event.on('error', () => { this.handlePauseLike() })
+    global.app_event.on('musicToggled', () => { this.markInteraction() })
+    global.app_event.on('setProgress', () => { this.markInteraction() })
+    this.lifecycleBound = true
   },
   addTimeHook(hook: Hook) {
     this.timeHooks.push(hook)
-    hook(this.getTime(), global.lx.isPlayedStop)
+    hook(createInfo(this))
   },
   removeTimeHook(hook: Hook) {
-    this.timeHooks.splice(this.timeHooks.indexOf(hook), 1)
+    const index = this.timeHooks.indexOf(hook)
+    if (index > -1) this.timeHooks.splice(index, 1)
   },
 }
-
 
 export const startTimeoutExit = (time: number) => {
   timeoutTools.start(time)
 }
 export const stopTimeoutExit = () => {
-  timeoutTools.clearTimeout()
+  timeoutTools.clearTimer()
+}
+export const startSmartTimeoutExit = () => {
+  timeoutTools.startSmart()
+}
+export const stopSmartTimeoutExit = () => {
+  timeoutTools.stopSmart()
 }
 
 export const getTimeoutExitTime = () => {
@@ -72,10 +216,10 @@ export const getTimeoutExitTime = () => {
 }
 
 export const useTimeoutExitTimeInfo = () => {
-  const [info, setInfo] = useState({ time: 0, isPlayedStop: false })
+  const [info, setInfo] = useState<TimeoutExitInfo>(createInfo(timeoutTools))
   useEffect(() => {
-    const hook: Hook = (time, isPlayedStop) => {
-      setInfo({ time, isPlayedStop })
+    const hook: Hook = (info) => {
+      setInfo(info)
     }
     timeoutTools.addTimeHook(hook)
     return () => { timeoutTools.removeTimeHook(hook) }
@@ -91,7 +235,6 @@ export const onTimeUpdate = (handler: Hook) => {
     timeoutTools.removeTimeHook(handler)
   }
 }
-
 
 export const cancelTimeoutExit = () => {
   global.lx.isPlayedStop = false

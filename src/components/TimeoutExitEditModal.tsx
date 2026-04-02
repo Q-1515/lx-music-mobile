@@ -5,12 +5,23 @@ import { View } from 'react-native'
 import Input, { type InputType } from '@/components/common/Input'
 import { createStyle, toast } from '@/utils/tools'
 import { useTheme } from '@/store/theme/hook'
-import { cancelTimeoutExit, getTimeoutExitTime, onTimeUpdate, startTimeoutExit, stopTimeoutExit, useTimeoutExitTimeInfo } from '@/core/player/timeoutExit'
+import Button from '@/components/common/Button'
+import {
+  cancelTimeoutExit,
+  getTimeoutExitTime,
+  onTimeUpdate,
+  startSmartTimeoutExit,
+  startTimeoutExit,
+  stopSmartTimeoutExit,
+  stopTimeoutExit,
+  useTimeoutExitTimeInfo,
+} from '@/core/player/timeoutExit'
 import { useI18n } from '@/lang'
 import CheckBox from './common/CheckBox'
 import { useSettingValue } from '@/store/setting/hook'
 import { updateSetting } from '@/core/common'
 import settingState from '@/store/setting/state'
+import { isSmartSleepCloseSupported } from '@/utils/nativeModules/smartSleepClose'
 
 const MAX_MIN = 1440
 const rxp = /([1-9]\d*)/
@@ -29,17 +40,14 @@ const Status = () => {
   const theme = useTheme()
   const t = useI18n()
   const exitTimeInfo = useTimeoutExitTimeInfo()
+  const statusText = exitTimeInfo.mode == 'smart'
+    ? t(exitTimeInfo.smartState == 'collecting_motion' ? 'timeout_exit_tip_smart_collecting' : 'timeout_exit_tip_smart_waiting')
+    : exitTimeInfo.time < 0
+      ? t('timeout_exit_tip_off')
+      : t('timeout_exit_tip_on', { time: formatTime(exitTimeInfo.time) })
   return (
     <View style={styles.tip}>
-      {
-      exitTimeInfo.time < 0
-        ? (
-            <Text>{t('timeout_exit_tip_off')}</Text>
-          )
-        : (
-            <Text>{t('timeout_exit_tip_on', { time: formatTime(exitTimeInfo.time) })}</Text>
-          )
-      }
+      <Text>{statusText}</Text>
       {exitTimeInfo.isPlayedStop ? <Text color={theme['c-font-label']} size={13}>{t('timeout_exit_btn_wait_tip')}</Text> : null}
     </View>
   )
@@ -95,37 +103,92 @@ const Setting = () => {
   )
 }
 
+const SmartClose = ({ mode }: { mode: ReturnType<typeof useTimeInfo>['mode'] }) => {
+  const t = useI18n()
+  const theme = useTheme()
+  const supported = isSmartSleepCloseSupported()
+
+  const handlePress = () => {
+    if (!supported) {
+      toast(t('timeout_exit_tip_smart_unsupported'))
+      return
+    }
+    if (mode == 'smart') {
+      stopSmartTimeoutExit()
+      toast(t('timeout_exit_tip_smart_off'))
+    } else {
+      startSmartTimeoutExit()
+      toast(t('timeout_exit_tip_smart_on'))
+    }
+  }
+
+  return (
+    <View style={styles.smartClose}>
+      <Button style={{ ...styles.smartCloseBtn, backgroundColor: theme['c-button-background'] }} onPress={handlePress}>
+        <Text color={theme['c-button-font']}>{t(mode == 'smart' ? 'timeout_exit_btn_smart_stop' : 'timeout_exit_btn_smart_start')}</Text>
+      </Button>
+    </View>
+  )
+}
+
 export const useTimeInfo = () => {
   const [exitTimeInfo, setExitTimeInfo] = useState({
     cancelText: '',
     confirmText: '',
     isPlayedStop: false,
     active: false,
+    mode: 'off' as const,
+    smartState: 'idle' as const,
   })
   const t = useI18n()
 
   useEffect(() => {
     let active: boolean | null = null
-    const remove = onTimeUpdate((time, isPlayedStop) => {
-      if (time < 0) {
+    const remove = onTimeUpdate(({ time, isPlayedStop, mode, smartState, active: isActive }) => {
+      if (!isActive) {
         if (active) {
           setExitTimeInfo({
-            cancelText: isPlayedStop ? t('timeout_exit_btn_wait_cancel') : '',
+            cancelText: '',
             confirmText: '',
             isPlayedStop,
             active: false,
+            mode,
+            smartState,
           })
           active = false
         }
       } else {
         if (active !== true) {
           setExitTimeInfo({
-            cancelText: t('timeout_exit_btn_cancel'),
-            confirmText: t('timeout_exit_btn_update'),
+            cancelText: isPlayedStop
+              ? t('timeout_exit_btn_wait_cancel')
+              : mode == 'timer'
+                ? t('timeout_exit_btn_cancel')
+                : mode == 'smart'
+                  ? t('timeout_exit_btn_smart_stop')
+                  : '',
+            confirmText: mode == 'timer' ? t('timeout_exit_btn_update') : '',
             isPlayedStop,
             active: true,
+            mode,
+            smartState,
           })
           active = true
+        } else {
+          setExitTimeInfo({
+            cancelText: isPlayedStop
+              ? t('timeout_exit_btn_wait_cancel')
+              : mode == 'timer'
+                ? t('timeout_exit_btn_cancel')
+                : mode == 'smart'
+                  ? t('timeout_exit_btn_smart_stop')
+                  : '',
+            confirmText: mode == 'timer' ? t('timeout_exit_btn_update') : '',
+            isPlayedStop,
+            active: true,
+            mode,
+            smartState,
+          })
         }
       }
     })
@@ -177,6 +240,11 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
       cancelTimeoutExit()
       return
     }
+    if (timeInfo.mode == 'smart') {
+      stopSmartTimeoutExit()
+      toast(t('timeout_exit_tip_smart_off'))
+      return
+    }
     if (!timeInfo.active) return
     stopTimeoutExit()
     toast(t('timeout_exit_tip_cancel'))
@@ -210,11 +278,13 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
           ref={alertRef}
           cancelText={timeInfo.cancelText}
           confirmText={timeInfo.confirmText}
+          showConfirm={timeInfo.mode != 'smart'}
           onCancel={handleCancel}
           onConfirm={handleConfirm}
         >
           <View style={styles.alertContent}>
             <Status />
+            <SmartClose mode={timeInfo.mode} />
             <View style={styles.inputContent}>
               <TimeInput ref={timeInputRef} />
               <Text style={styles.inputLabel}>{t('timeout_exit_min')}</Text>
@@ -236,6 +306,19 @@ const styles = createStyle({
   },
   checkbox: {
     marginTop: 5,
+  },
+  smartClose: {
+    marginTop: 4,
+    marginBottom: 8,
+    flexDirection: 'row',
+  },
+  smartCloseBtn: {
+    flexGrow: 1,
+    flexShrink: 1,
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 10,
+    borderRadius: 4,
   },
   inputContent: {
     marginTop: 8,

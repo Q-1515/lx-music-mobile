@@ -7,6 +7,7 @@
 #import <ReactNativeNavigation/ReactNativeNavigation.h>
 #import <Security/Security.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreMotion/CoreMotion.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <math.h>
@@ -1959,6 +1960,314 @@ static void LXStreamingFlacErrorCallback(const FLAC__StreamDecoder *decoder, FLA
   [(__bridge StreamingFlacPlayerModule *)client_data handleDecoderErrorStatus:status];
 }
 #endif
+
+@interface SmartSleepCloseModule : RCTEventEmitter<RCTBridgeModule>
+@property (nonatomic, strong) CMMotionManager *motionManager;
+@property (nonatomic, strong) NSOperationQueue *motionQueue;
+@property (nonatomic, strong) dispatch_queue_t monitorQueue;
+@property (nonatomic, strong) dispatch_source_t checkTimer;
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *motionSamples;
+@property (nonatomic, copy) NSString *monitorState;
+@property (nonatomic, assign) BOOL hasListeners;
+@property (nonatomic, assign) BOOL monitoringEnabled;
+@property (nonatomic, assign) BOOL motionSamplingActive;
+@property (nonatomic, assign) NSTimeInterval lastUserInteractionAt;
+@property (nonatomic, assign) double inactivityThresholdSeconds;
+@property (nonatomic, assign) double motionWindowSeconds;
+@property (nonatomic, assign) double prewarmSeconds;
+@property (nonatomic, assign) double checkIntervalSeconds;
+@property (nonatomic, assign) double sampleIntervalSeconds;
+@property (nonatomic, assign) CMAcceleration lastUserAcceleration;
+@property (nonatomic, assign) BOOL hasLastUserAcceleration;
+@end
+
+@implementation SmartSleepCloseModule
+
+RCT_EXPORT_MODULE();
+
++ (BOOL)requiresMainQueueSetup {
+  return YES;
+}
+
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _motionManager = [[CMMotionManager alloc] init];
+    _motionQueue = [[NSOperationQueue alloc] init];
+    _motionQueue.maxConcurrentOperationCount = 1;
+    _monitorQueue = dispatch_queue_create("cn.toside.music.mobile.smartsleep", DISPATCH_QUEUE_SERIAL);
+    _motionSamples = [NSMutableArray array];
+    _monitorState = @"idle";
+    _inactivityThresholdSeconds = 10 * 60;
+    _motionWindowSeconds = 5 * 60;
+    _prewarmSeconds = 5 * 60;
+    _checkIntervalSeconds = 5;
+    _sampleIntervalSeconds = 1;
+  }
+  return self;
+}
+
+- (NSArray<NSString *> *)supportedEvents {
+  return @[ @"smart-sleep-close-event" ];
+}
+
+- (void)startObserving {
+  self.hasListeners = YES;
+}
+
+- (void)stopObserving {
+  self.hasListeners = NO;
+}
+
+- (NSTimeInterval)currentTimestamp {
+  return CFAbsoluteTimeGetCurrent();
+}
+
+- (NSTimeInterval)currentInactiveSecondsLocked {
+  return MAX([self currentTimestamp] - self.lastUserInteractionAt, 0);
+}
+
+- (void)emitEventWithType:(NSString *)type body:(NSDictionary *)body {
+  if (!self.hasListeners) return;
+  NSMutableDictionary *payload = body != nil ? [body mutableCopy] : [NSMutableDictionary dictionary];
+  payload[@"type"] = type ?: @"state";
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self sendEventWithName:@"smart-sleep-close-event" body:payload];
+  });
+}
+
+- (void)emitStateLocked:(NSString *)state {
+  self.monitorState = state ?: @"idle";
+  [self emitEventWithType:@"state" body:@{
+    @"state": self.monitorState,
+    @"inactiveSeconds": @([self currentInactiveSecondsLocked]),
+  }];
+}
+
+- (void)emitErrorLocked:(NSString *)message {
+  [self emitEventWithType:@"error" body:@{
+    @"message": message ?: @"Smart sleep close failed",
+  }];
+}
+
+- (void)clearMotionSamplesLocked {
+  [self.motionSamples removeAllObjects];
+  self.hasLastUserAcceleration = NO;
+}
+
+- (NSUInteger)maxMotionSampleCountLocked {
+  return MAX((NSUInteger)llround(self.motionWindowSeconds / MAX(self.sampleIntervalSeconds, 0.25)), 1);
+}
+
+- (NSUInteger)requiredMotionSampleCountLocked {
+  return MAX((NSUInteger)floor([self maxMotionSampleCountLocked] * 0.8), 30);
+}
+
+- (void)startMotionSamplingLocked {
+  if (self.motionSamplingActive) return;
+  if (!self.motionManager.isDeviceMotionAvailable) {
+    self.monitoringEnabled = NO;
+    [self emitErrorLocked:@"Device motion is not available"];
+    return;
+  }
+
+  [self clearMotionSamplesLocked];
+  self.motionSamplingActive = YES;
+  self.motionManager.deviceMotionUpdateInterval = MAX(self.sampleIntervalSeconds, 0.25);
+
+  __weak typeof(self) weakSelf = self;
+  [self.motionManager startDeviceMotionUpdatesToQueue:self.motionQueue withHandler:^(CMDeviceMotion * _Nullable motion, NSError * _Nullable error) {
+    __strong typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf == nil) return;
+    if (error != nil || motion == nil) {
+      dispatch_async(strongSelf.monitorQueue, ^{
+        if (!strongSelf.monitoringEnabled) return;
+        strongSelf.monitoringEnabled = NO;
+        [strongSelf stopMotionSamplingLocked];
+        [strongSelf emitErrorLocked:error.localizedDescription ?: @"Device motion sampling failed"];
+      });
+      return;
+    }
+
+    dispatch_async(strongSelf.monitorQueue, ^{
+      if (!strongSelf.monitoringEnabled || !strongSelf.motionSamplingActive) return;
+
+      double gyroScore = fabs(motion.rotationRate.x) + fabs(motion.rotationRate.y) + fabs(motion.rotationRate.z);
+      CMAcceleration userAcceleration = motion.userAcceleration;
+      double accelDelta = strongSelf.hasLastUserAcceleration
+        ? fabs(userAcceleration.x - strongSelf.lastUserAcceleration.x) + fabs(userAcceleration.y - strongSelf.lastUserAcceleration.y) + fabs(userAcceleration.z - strongSelf.lastUserAcceleration.z)
+        : fabs(userAcceleration.x) + fabs(userAcceleration.y) + fabs(userAcceleration.z);
+      strongSelf.lastUserAcceleration = userAcceleration;
+      strongSelf.hasLastUserAcceleration = YES;
+
+      double movementScore = gyroScore * 0.55 + accelDelta * 0.45;
+      [strongSelf.motionSamples addObject:@(movementScore)];
+      NSUInteger maxCount = [strongSelf maxMotionSampleCountLocked];
+      while (strongSelf.motionSamples.count > maxCount) {
+        [strongSelf.motionSamples removeObjectAtIndex:0];
+      }
+    });
+  }];
+}
+
+- (void)stopMotionSamplingLocked {
+  if (!self.motionSamplingActive && !self.motionManager.isDeviceMotionActive) return;
+  [self.motionManager stopDeviceMotionUpdates];
+  self.motionSamplingActive = NO;
+  self.hasLastUserAcceleration = NO;
+}
+
+- (void)stopCheckTimerLocked {
+  if (self.checkTimer == nil) return;
+  dispatch_source_cancel(self.checkTimer);
+  self.checkTimer = nil;
+}
+
+- (void)stopMonitoringInternalLockedResetState:(BOOL)resetState {
+  self.monitoringEnabled = NO;
+  [self stopCheckTimerLocked];
+  [self stopMotionSamplingLocked];
+  [self clearMotionSamplesLocked];
+  if (resetState) self.monitorState = @"idle";
+}
+
+- (BOOL)isMotionStableLocked {
+  NSUInteger count = self.motionSamples.count;
+  if (count < [self requiredMotionSampleCountLocked]) return NO;
+
+  static const double lowMotionThreshold = 0.08;
+  static const double highMotionThreshold = 0.25;
+  NSUInteger lowCount = 0;
+  for (NSNumber *value in self.motionSamples) {
+    double score = value.doubleValue;
+    if (score < lowMotionThreshold) lowCount += 1;
+    if (score > highMotionThreshold) return NO;
+  }
+
+  return ((double)lowCount / (double)count) >= 0.95;
+}
+
+- (void)handleTriggeredLocked {
+  if (!self.monitoringEnabled) return;
+  [self stopMonitoringInternalLockedResetState:NO];
+  self.monitorState = @"triggered";
+  [self emitEventWithType:@"triggered" body:@{
+    @"state": @"triggered",
+    @"inactiveSeconds": @([self currentInactiveSecondsLocked]),
+  }];
+}
+
+- (void)handleCheckLocked {
+  if (!self.monitoringEnabled) return;
+
+  NSTimeInterval inactiveSeconds = [self currentInactiveSecondsLocked];
+  if (inactiveSeconds >= self.prewarmSeconds) {
+    if (!self.motionSamplingActive) {
+      [self startMotionSamplingLocked];
+      [self emitStateLocked:@"collecting_motion"];
+    }
+  } else {
+    if (self.motionSamplingActive) {
+      [self stopMotionSamplingLocked];
+      [self clearMotionSamplesLocked];
+    }
+    if (![self.monitorState isEqualToString:@"waiting_inactive"]) {
+      [self emitStateLocked:@"waiting_inactive"];
+    }
+    return;
+  }
+
+  if (inactiveSeconds < self.inactivityThresholdSeconds) return;
+  if (![self isMotionStableLocked]) return;
+  [self handleTriggeredLocked];
+}
+
+- (void)startCheckTimerLocked {
+  [self stopCheckTimerLocked];
+  self.checkTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self.monitorQueue);
+  uint64_t interval = (uint64_t)(MAX(self.checkIntervalSeconds, 1) * NSEC_PER_SEC);
+  dispatch_source_set_timer(self.checkTimer, dispatch_time(DISPATCH_TIME_NOW, interval), interval, (uint64_t)(0.5 * NSEC_PER_SEC));
+  __weak typeof(self) weakSelf = self;
+  dispatch_source_set_event_handler(self.checkTimer, ^{
+    __strong typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf == nil) return;
+    [strongSelf handleCheckLocked];
+  });
+  dispatch_resume(self.checkTimer);
+}
+
+RCT_REMAP_METHOD(startMonitoring, startMonitoring:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(self.monitorQueue, ^{
+    NSNumber *inactiveSeconds = [options[@"inactivityThresholdSeconds"] isKindOfClass:[NSNumber class]] ? options[@"inactivityThresholdSeconds"] : nil;
+    NSNumber *motionSeconds = [options[@"motionWindowSeconds"] isKindOfClass:[NSNumber class]] ? options[@"motionWindowSeconds"] : nil;
+    NSNumber *prewarmSeconds = [options[@"prewarmSeconds"] isKindOfClass:[NSNumber class]] ? options[@"prewarmSeconds"] : nil;
+    NSNumber *checkIntervalSeconds = [options[@"checkIntervalSeconds"] isKindOfClass:[NSNumber class]] ? options[@"checkIntervalSeconds"] : nil;
+    NSNumber *sampleIntervalSeconds = [options[@"sampleIntervalSeconds"] isKindOfClass:[NSNumber class]] ? options[@"sampleIntervalSeconds"] : nil;
+
+    self.inactivityThresholdSeconds = MAX(inactiveSeconds != nil ? inactiveSeconds.doubleValue : 10 * 60, 60);
+    self.motionWindowSeconds = MAX(motionSeconds != nil ? motionSeconds.doubleValue : 5 * 60, 30);
+    self.prewarmSeconds = MIN(MAX(prewarmSeconds != nil ? prewarmSeconds.doubleValue : 5 * 60, 10), self.inactivityThresholdSeconds);
+    self.checkIntervalSeconds = MAX(checkIntervalSeconds != nil ? checkIntervalSeconds.doubleValue : 5, 1);
+    self.sampleIntervalSeconds = MAX(sampleIntervalSeconds != nil ? sampleIntervalSeconds.doubleValue : 1, 0.25);
+
+    [self stopMonitoringInternalLockedResetState:NO];
+    self.monitoringEnabled = YES;
+    self.lastUserInteractionAt = [self currentTimestamp];
+    self.monitorState = @"waiting_inactive";
+    [self clearMotionSamplesLocked];
+    [self startCheckTimerLocked];
+    [self emitStateLocked:@"waiting_inactive"];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+      resolve(nil);
+    });
+  });
+}
+
+RCT_REMAP_METHOD(stopMonitoring, stopMonitoringWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(self.monitorQueue, ^{
+    [self stopMonitoringInternalLockedResetState:YES];
+    [self emitStateLocked:@"idle"];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      resolve(nil);
+    });
+  });
+}
+
+RCT_REMAP_METHOD(markUserInteraction, markUserInteractionWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(self.monitorQueue, ^{
+    if (!self.monitoringEnabled) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        resolve(nil);
+      });
+      return;
+    }
+
+    self.lastUserInteractionAt = [self currentTimestamp];
+    if (self.motionSamplingActive) {
+      [self stopMotionSamplingLocked];
+      [self clearMotionSamplesLocked];
+    }
+    [self emitStateLocked:@"waiting_inactive"];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      resolve(nil);
+    });
+  });
+}
+
+RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(self.monitorQueue, ^{
+    NSDictionary *result = @{
+      @"state": self.monitorState ?: @"idle",
+      @"active": @(self.monitoringEnabled),
+    };
+    dispatch_async(dispatch_get_main_queue(), ^{
+      resolve(result);
+    });
+  });
+}
+
+@end
 
 @interface FilePickerModule : NSObject<RCTBridgeModule, UIDocumentPickerDelegate>
 @property (nonatomic, copy) RCTPromiseResolveBlock pickerResolve;

@@ -472,7 +472,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                     ))}
                     <OptionRow
                       label={t('timeout_exit_option_custom')}
-                      valueText={customValueText}
+                      valueText={activeOption == 'custom' ? customValueText : undefined}
                       active={activeOption == 'custom'}
                       onPress={() => { void handleOpenCustomPicker() }}
                     />

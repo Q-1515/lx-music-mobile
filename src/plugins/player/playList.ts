@@ -12,6 +12,7 @@ import {
   getNativeFlacState,
   getNativeFlacTrackId,
   isNativeFlacActive,
+  pauseNativeFlacPlayback,
   resetNativeFlacPlayback,
   shouldUseNativeFlacPlayer,
   startNativeFlacPlayback,
@@ -238,6 +239,13 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
   })
 }
 
+const resolveShouldAutoStart = (currentTrackIndex: number | null) => {
+  if (currentTrackIndex != null) return true
+  if (!global.lx.restorePlayInfo) return true
+  global.lx.restorePlayInfo = null
+  return false
+}
+
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
   if (force) {
     const duration = await getTrackDuration()
@@ -272,26 +280,36 @@ export const initTrackInfo = async(musicInfo: LX.Player.PlayMusic, mInfo: LX.Pla
 }
 
 
-const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time: number) => {
-  if (Platform.OS == 'ios' && shouldUseNativeFlacPlayer(musicInfo, url)) {
-    await TrackPlayer.reset().catch(async() => {
-      await TrackPlayer.stop().catch(() => {})
-    })
-    clearTracks()
-    const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time)
-    global.lx.playerTrackId = getNativeFlacTrackId()
-    ensureCurrentTrackMetadata({
-      title: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.name : musicInfo.name) ?? 'Unknow',
-      artist: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.singer : musicInfo.singer) ?? 'Unknow',
-      album: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.meta.albumName : musicInfo.meta.albumName) ?? undefined,
-      artwork: 'progress' in musicInfo
-        ? (typeof musicInfo.metadata.musicInfo.meta.picUrl == 'string' ? musicInfo.metadata.musicInfo.meta.picUrl : undefined)
-        : (typeof musicInfo.meta.picUrl == 'string' ? musicInfo.meta.picUrl : undefined),
-      duration: playbackInfo.duration,
-      elapsedTime: playbackInfo.position,
-      playbackRate: settingState.setting['player.playbackRate'],
-    })
-    return
+const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time: number, quality?: LX.Quality | null) => {
+  const currentTrackIndex = await TrackPlayer.getCurrentTrack()
+  const shouldAutoStart = resolveShouldAutoStart(currentTrackIndex)
+  if (Platform.OS == 'ios' && shouldUseNativeFlacPlayer(musicInfo, url, quality)) {
+    global.lx.playerStatus.ignoreTrackPlayerLifecycle = true
+    try {
+      await TrackPlayer.reset().catch(async() => {
+        await TrackPlayer.stop().catch(() => {})
+      })
+      clearTracks()
+      const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time)
+      global.lx.playerTrackId = getNativeFlacTrackId()
+      if (!shouldAutoStart) {
+        await pauseNativeFlacPlayback().catch(() => {})
+      }
+      ensureCurrentTrackMetadata({
+        title: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.name : musicInfo.name) ?? 'Unknow',
+        artist: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.singer : musicInfo.singer) ?? 'Unknow',
+        album: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.meta.albumName : musicInfo.meta.albumName) ?? undefined,
+        artwork: 'progress' in musicInfo
+          ? (typeof musicInfo.metadata.musicInfo.meta.picUrl == 'string' ? musicInfo.metadata.musicInfo.meta.picUrl : undefined)
+          : (typeof musicInfo.meta.picUrl == 'string' ? musicInfo.meta.picUrl : undefined),
+        duration: playbackInfo.duration,
+        elapsedTime: playbackInfo.position,
+        playbackRate: shouldAutoStart ? settingState.setting['player.playbackRate'] : 0,
+      })
+      return
+    } finally {
+      global.lx.playerStatus.ignoreTrackPlayerLifecycle = false
+    }
   }
   if (Platform.OS == 'ios' && isNativeFlacActive()) {
     await resetNativeFlacPlayback().catch(() => {})
@@ -301,7 +319,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
   const track = tracks[0]
   let isPlaying = false
   // await updateMusicInfo(track)
-  const currentTrackIndex = await TrackPlayer.getCurrentTrack()
   await TrackPlayer.add(tracks).then(() => list.push(...tracks))
   const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
   await TrackPlayer.skip(queue.findIndex(t => t.id == track.id))
@@ -310,13 +327,8 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
   if (currentTrackIndex == null) {
     if (!isTempTrack(track.id as string)) {
       if (time) await seekToTime(time)
-      if (global.lx.restorePlayInfo) {
+      if (!shouldAutoStart) {
         await TrackPlayer.pause()
-        // let startupAutoPlay = settingState.setting['player.startupAutoPlay']
-        global.lx.restorePlayInfo = null
-
-      // TODO startupAutoPlay
-      // if (startupAutoPlay) store.dispatch(playerAction.playMusic())
       } else {
         await TrackPlayer.play()
         await applyCurrentVolume()

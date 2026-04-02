@@ -27,6 +27,7 @@ global.lx = {
     isInitialized: false,
     isRegisteredService: false,
     isIniting: false,
+    ignoreTrackPlayerLifecycle: false,
   },
 
   restorePlayInfo: null,

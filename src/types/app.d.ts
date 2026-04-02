@@ -26,6 +26,7 @@ interface GlobalData {
     isInitialized: boolean
     isRegisteredService: boolean
     isIniting: boolean
+    ignoreTrackPlayerLifecycle: boolean
   }
   restorePlayInfo: LX.Player.SavedPlayInfo | null
   isScreenKeepAwake: boolean

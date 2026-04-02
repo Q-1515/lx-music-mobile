@@ -3,6 +3,7 @@
 
 import {
   getMusicUrl as getOnlineMusicUrl,
+  getMusicUrlInfo as getOnlineMusicUrlInfo,
   getPicUrl as getOnlinePicUrl,
   getLyricInfo as getOnlineLyricInfo,
 } from './online'
@@ -21,6 +22,13 @@ export const getMusicUrl = async({ musicInfo, isRefresh, allowToggleSource = tru
 
   return getOnlineMusicUrl({ musicInfo: musicInfo.metadata.musicInfo, isRefresh, onToggleSource, allowToggleSource })
 }
+
+export const getMusicUrlInfo = async({ musicInfo, isRefresh, allowToggleSource = true, onToggleSource = () => {} }: {
+  musicInfo: LX.Download.ListItem
+  isRefresh: boolean
+  onToggleSource?: (musicInfo?: LX.Music.MusicInfoOnline) => void
+  allowToggleSource?: boolean
+}) => getOnlineMusicUrlInfo({ musicInfo: musicInfo.metadata.musicInfo, isRefresh, onToggleSource, allowToggleSource })
 
 export const getPicUrl = async({ musicInfo, isRefresh, listId, onToggleSource = () => {} }: {
   musicInfo: LX.Download.ListItem

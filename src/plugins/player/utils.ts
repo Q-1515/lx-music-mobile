@@ -10,6 +10,8 @@ import {
   getNativeFlacDuration,
   getNativeFlacPosition,
   isNativeFlacActive,
+  getNativeFlacState,
+  onNativeFlacPlayerEvent,
   pauseNativeFlacPlayback,
   resetNativeFlacPlayback,
   resumeNativeFlacPlayback,
@@ -141,17 +143,19 @@ export const isTempId = (trackId = global.lx.playerTrackId) => {
 //   },
 // }
 
-const playMusic = ((fn: (musicInfo: LX.Player.PlayMusic, url: string, time: number) => void, delay = 800) => {
+const playMusic = ((fn: (musicInfo: LX.Player.PlayMusic, url: string, time: number, quality?: LX.Quality | null) => void, delay = 800) => {
   let delayTimer: number | null = null
   let isDelayRun = false
   let timer: number | null = null
   let _musicInfo: LX.Player.PlayMusic | null = null
   let _url = ''
   let _time = 0
-  return (musicInfo: LX.Player.PlayMusic, url: string, time: number) => {
+  let _quality: LX.Quality | null = null
+  return (musicInfo: LX.Player.PlayMusic, url: string, time: number, quality?: LX.Quality | null) => {
     _musicInfo = musicInfo
     _url = url
     _time = time
+    _quality = quality ?? null
     if (timer) {
       BackgroundTimer.clearTimeout(timer)
       timer = null
@@ -166,27 +170,29 @@ const playMusic = ((fn: (musicInfo: LX.Player.PlayMusic, url: string, time: numb
         let musicInfo = _musicInfo
         let url = _url
         let time = _time
+        let quality = _quality
         _musicInfo = null
         _url = ''
         _time = 0
+        _quality = null
         isDelayRun = false
-        fn(musicInfo!, url, time)
+        fn(musicInfo!, url, time, quality)
       }, delay)
     } else {
       isDelayRun = true
-      fn(musicInfo, url, time)
+      fn(musicInfo, url, time, quality ?? null)
       delayTimer = BackgroundTimer.setTimeout(() => {
         delayTimer = null
         isDelayRun = false
       }, 500)
     }
   }
-})((musicInfo, url, time) => {
-  handlePlayMusic(musicInfo, url, time)
+})((musicInfo, url, time, quality) => {
+  handlePlayMusic(musicInfo, url, time, quality)
 })
 
-export const setResource = (musicInfo: LX.Player.PlayMusic, url: string, duration?: number) => {
-  playMusic(musicInfo, url, duration ?? 0)
+export const setResource = (musicInfo: LX.Player.PlayMusic, url: string, duration?: number, quality?: LX.Quality | null) => {
+  playMusic(musicInfo, url, duration ?? 0, quality)
 }
 
 export const setPlay = async() => {
@@ -282,8 +288,29 @@ export const destroy = async() => {
 
 type PlayStatus = 'None' | 'Ready' | 'Playing' | 'Paused' | 'Stopped' | 'Buffering' | 'Connecting'
 
+type NativePlayerState = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'stopped'
+
+const mapNativeFlacPlayStatus = (state: NativePlayerState): PlayStatus => {
+  switch (state) {
+    case 'loading':
+      return 'Connecting'
+    case 'buffering':
+      return 'Buffering'
+    case 'playing':
+      return 'Playing'
+    case 'paused':
+      return 'Paused'
+    case 'stopped':
+      return 'Stopped'
+    case 'idle':
+    default:
+      return 'None'
+  }
+}
+
 export const onStateChange = async(listener: (state: PlayStatus) => void) => {
   const sub = TrackPlayer.addEventListener(Event.PlaybackState, state => {
+    if (Platform.OS == 'ios' && isNativeFlacActive()) return
     let _state: PlayStatus
     switch (state) {
       case State.Ready:
@@ -311,9 +338,28 @@ export const onStateChange = async(listener: (state: PlayStatus) => void) => {
     }
     listener(_state)
   })
+  const removeNativeFlacListener = onNativeFlacPlayerEvent((event) => {
+    switch (event.type) {
+      case 'state':
+        listener(mapNativeFlacPlayStatus(event.state))
+        break
+      case 'ended':
+        listener('Stopped')
+        break
+      case 'error':
+        listener('Paused')
+        break
+    }
+  })
+  if (Platform.OS == 'ios' && isNativeFlacActive()) {
+    void getNativeFlacState().then((state) => {
+      listener(mapNativeFlacPlayStatus(state))
+    }).catch(() => {})
+  }
 
   return () => {
     sub.remove()
+    removeNativeFlacListener()
   }
 }
 

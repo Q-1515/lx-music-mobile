@@ -1,7 +1,10 @@
 import TrackPlayer, { State } from 'react-native-track-player'
+import { Platform } from 'react-native'
 import { updateOptions, setVolume, setPlaybackRate, migratePlayerCache, destroy as destroyPlayer, getPosition } from './utils'
-import { getCurrentTrack, restoreTrack } from './playList'
+import { clearTracks, getCurrentTrack, restoreTrack, updateMetaData } from './playList'
+import { isNativeFlacActive } from './nativeFlac'
 import settingState from '@/store/setting/state'
+import playerState from '@/store/player/state'
 
 // const listenEvent = () => {
 //   TrackPlayer.addEventListener('playback-error', err => {
@@ -61,12 +64,28 @@ const reloadConfig = async() => {
   const run = async() => {
     if (global.lx.playerStatus.isIniting || !global.lx.playerStatus.isInitialized) return
 
+    if (Platform.OS == 'ios' && isNativeFlacActive()) {
+      global.lx.playerStatus.ignoreTrackPlayerLifecycle = true
+      try {
+        await TrackPlayer.destroy().catch(() => {})
+        clearTracks()
+        global.lx.playerStatus.isInitialized = false
+        await initial(getPlayerConfig())
+        if (playerState.musicInfo.id) {
+          void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric, true)
+        }
+      } finally {
+        global.lx.playerStatus.ignoreTrackPlayerLifecycle = false
+      }
+      return
+    }
+
     const [track, position, currentState] = await Promise.all([
       getCurrentTrack(),
       getPosition(),
       TrackPlayer.getState(),
     ])
-    const shouldRestoreTrack = !!track && !/\/\/default$/.test(track.id)
+    const shouldRestoreTrack = typeof track?.id == 'string' && !/\/\/default$/.test(track.id)
 
     await destroyPlayer()
     await initial(getPlayerConfig())

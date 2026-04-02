@@ -99,6 +99,35 @@ export const getMusicUrl = async({ musicInfo, isRefresh, allowToggleSource = tru
   })
 }
 
+export const getMusicUrlInfo = async({ musicInfo, isRefresh, allowToggleSource = true, onToggleSource = () => {} }: {
+  musicInfo: LX.Music.MusicInfoLocal
+  isRefresh: boolean
+  onToggleSource?: (musicInfo?: LX.Music.MusicInfoOnline) => void
+  allowToggleSource?: boolean
+}): Promise<{ url: string, quality: LX.Quality | null }> => {
+  if (!isRefresh) {
+    const path = await getLocalFilePath(musicInfo)
+    if (path) return { url: path, quality: null }
+  }
+
+  try {
+    return await getOnlineOtherSourceMusicUrlByLocal(musicInfo, isRefresh).then(({ url, quality, isFromCache }) => {
+      if (!isFromCache) void saveMusicUrl(musicInfo, quality, url)
+      return { url, quality }
+    })
+  } catch {}
+
+  if (!allowToggleSource) throw new Error('failed')
+
+  onToggleSource()
+  return getOtherSourceByLocal(musicInfo, async(otherSource) => {
+    return getOnlineOtherSourceMusicUrl({ musicInfos: [...otherSource], onToggleSource, isRefresh }).then(({ url, quality: targetQuality, musicInfo: targetMusicInfo, isFromCache }) => {
+      if (!isFromCache) void saveMusicUrl(targetMusicInfo, targetQuality, url)
+      return { url, quality: targetQuality }
+    })
+  })
+}
+
 export const getPicUrl = async({ musicInfo, listId, isRefresh, skipFilePic, onToggleSource = () => {} }: {
   musicInfo: LX.Music.MusicInfoLocal
   listId?: string | null

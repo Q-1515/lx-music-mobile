@@ -3,17 +3,17 @@
 //   // console.log(filePath)
 
 import {
-  getMusicUrl as getOnlineMusicUrl,
+  getMusicUrlInfo as getOnlineMusicUrlInfo,
   getPicUrl as getOnlinePicUrl,
   getLyricInfo as getOnlineLyricInfo,
 } from './online'
 import {
-  getMusicUrl as getDownloadMusicUrl,
+  getMusicUrlInfo as getDownloadMusicUrlInfo,
   getPicUrl as getDownloadPicUrl,
   getLyricInfo as getDownloadLyricInfo,
 } from './download'
 import {
-  getMusicUrl as getLocalMusicUrl,
+  getMusicUrlInfo as getLocalMusicUrlInfo,
   getPicUrl as getLocalPicUrl,
   getLyricInfo as getLocalLyricInfo,
 } from './local'
@@ -32,12 +32,28 @@ export const getMusicUrl = async({
   onToggleSource?: (musicInfo?: LX.Music.MusicInfoOnline) => void
   allowToggleSource?: boolean
 }): Promise<string> => {
+  return getMusicUrlInfo({ musicInfo, quality, isRefresh, onToggleSource, allowToggleSource }).then(({ url }) => url)
+}
+
+export const getMusicUrlInfo = async({
+  musicInfo,
+  quality,
+  isRefresh = false,
+  onToggleSource,
+  allowToggleSource,
+}: {
+  musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
+  isRefresh?: boolean
+  quality?: LX.Quality
+  onToggleSource?: (musicInfo?: LX.Music.MusicInfoOnline) => void
+  allowToggleSource?: boolean
+}): Promise<{ url: string, quality: LX.Quality | null }> => {
   if ('progress' in musicInfo) {
-    return getDownloadMusicUrl({ musicInfo, isRefresh, onToggleSource, allowToggleSource })
+    return getDownloadMusicUrlInfo({ musicInfo, isRefresh, onToggleSource, allowToggleSource })
   } else if (musicInfo.source == 'local') {
-    return getLocalMusicUrl({ musicInfo, isRefresh, onToggleSource, allowToggleSource })
+    return getLocalMusicUrlInfo({ musicInfo, isRefresh, onToggleSource, allowToggleSource })
   } else {
-    return getOnlineMusicUrl({ musicInfo, isRefresh, quality, onToggleSource, allowToggleSource })
+    return getOnlineMusicUrlInfo({ musicInfo, isRefresh, quality, onToggleSource, allowToggleSource })
   }
 }
 

@@ -26,6 +26,7 @@ import settingState from '@/store/setting/state'
 import playerState from '@/store/player/state'
 import { tranditionalize } from '@/utils/simplify-chinese-main'
 import { getPosition } from '@/plugins/player/utils'
+import { getLyricPayload } from '@/core/lyricInfo'
 export {
   onLyricLinePlay,
 } from '@/utils/nativeModules/lyricDesktop'
@@ -48,9 +49,7 @@ export const showDesktopLyric = async() => {
     textPositionX: setting['desktopLyric.textPosition.x'],
     textPositionY: setting['desktopLyric.textPosition.y'],
   })
-  let lrc = playerState.musicInfo.lrc ?? ''
-  let tlrc = playerState.musicInfo.tlrc ?? ''
-  let rlrc = playerState.musicInfo.rlrc ?? ''
+  let { lyric: lrc, tlrc, rlrc } = getLyricPayload(playerState.musicInfo)
   if (setting['player.isS2t']) {
     lrc = tranditionalize(lrc)
     tlrc = tranditionalize(tlrc)
@@ -98,9 +97,7 @@ export const onDesktopLyricPositionChange = onPositionChange
 export const showRemoteLyric = async(isSend: boolean) => {
   await setSendLyricTextEvent(isSend)
   if (isSend) {
-    let lrc = playerState.musicInfo.lrc ?? ''
-    let tlrc = playerState.musicInfo.tlrc ?? ''
-    let rlrc = playerState.musicInfo.rlrc ?? ''
+    let { lyric: lrc, tlrc, rlrc } = getLyricPayload(playerState.musicInfo)
     if (settingState.setting['player.isS2t']) {
       lrc = tranditionalize(lrc)
       tlrc = tranditionalize(tlrc)

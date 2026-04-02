@@ -149,12 +149,13 @@ const playNativeFile = async(path: string, position: number) => {
 
 export const isNativeFlacPlayerAvailable = () => Platform.OS == 'ios' && (!!NativeFlacPlayer || isStreamingFlacSupported)
 
-export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: string) => {
+export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: string, quality?: LX.Quality | null) => {
   if (!isNativeFlacPlayerAvailable()) return false
 
   const info = getMusicInfo(musicInfo)
   const ext = getQualityExt(musicInfo, url)
   if (ext == 'flac') return true
+  if (quality != null) return preferredPreciseQualities.has(quality)
   if (info.source == 'local') return false
 
   const playQuality = settingState.setting['player.playQuality']

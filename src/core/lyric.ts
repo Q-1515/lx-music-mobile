@@ -18,6 +18,7 @@ import {
 } from '@/core/desktopLyric'
 import { getPosition } from '@/plugins/player/utils'
 import playerState from '@/store/player/state'
+import { getLyricPayload } from '@/core/lyricInfo'
 // import settingState from '@/store/setting/state'
 
 const getReliableLyricPosition = async() => {
@@ -137,12 +138,8 @@ export const seek = (time: number) => {
 
 export const setLyric = async() => {
   if (!playerState.musicInfo.id) return
-  const lyric = playerState.musicInfo.lxlrc ?? playerState.musicInfo.lrc
+  const { lyric, tlrc, rlrc } = getLyricPayload(playerState.musicInfo)
   if (lyric) {
-    let tlrc = ''
-    let rlrc = ''
-    if (playerState.musicInfo.tlrc) tlrc = playerState.musicInfo.tlrc
-    if (playerState.musicInfo.rlrc) rlrc = playerState.musicInfo.rlrc
     await handleSetLyric(lyric, tlrc, rlrc)
   }
 

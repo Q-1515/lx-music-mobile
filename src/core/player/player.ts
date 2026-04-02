@@ -19,7 +19,7 @@ import {
   clearTempPlayeList,
   removeTempPlayList,
 } from '@/core/player/tempPlayList'
-import { getMusicUrl, getPicPath, getLyricInfo } from '@/core/music'
+import { getMusicUrlInfo, getPicPath, getLyricInfo } from '@/core/music'
 import { requestMsg } from '@/utils/message'
 import { getRandom } from '@/utils/common'
 import { filterList } from './utils'
@@ -64,6 +64,11 @@ const createGettingUrlId = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   const tInfo = 'progress' in musicInfo ? musicInfo.metadata.musicInfo.meta.toggleMusicInfo : musicInfo.meta.toggleMusicInfo
   return `${musicInfo.id}_${tInfo?.id ?? ''}`
 }
+
+interface PlayUrlInfo {
+  url: string
+  quality: LX.Quality | null
+}
 /**
  * 检查音乐信息是否已更改
  */
@@ -73,7 +78,7 @@ const diffCurrentMusicInfo = (curMusicInfo: LX.Music.MusicInfo | LX.Download.Lis
 }
 
 let cancelDelayRetry: (() => void) | null = null
-const delayRetry = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListItem, isRefresh = false): Promise<string | null> => {
+const delayRetry = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListItem, isRefresh = false): Promise<PlayUrlInfo | null> => {
   // if (cancelDelayRetry) cancelDelayRetry()
   return new Promise<string | null>((resolve, reject) => {
     const time = getRandom(2, 6)
@@ -94,7 +99,7 @@ const delayRetry = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListItem, i
     }
   })
 }
-const getMusicPlayUrl = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListItem, isRefresh = false, isRetryed = false): Promise<string | null> => {
+const getMusicPlayUrl = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListItem, isRefresh = false, isRetryed = false): Promise<PlayUrlInfo | null> => {
   // this.musicInfo.url = await getMusicPlayUrl(targetSong, type)
   setStatusText(global.i18n.t('player__getting_url'))
   addLoadTimeout()
@@ -102,12 +107,12 @@ const getMusicPlayUrl = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListIt
   // const type = getPlayType(settingState.setting['player.isPlayHighQuality'], musicInfo)
   let toggleMusicInfo = ('progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo).meta.toggleMusicInfo
 
-  return (toggleMusicInfo ? getMusicUrl({
+  return (toggleMusicInfo ? getMusicUrlInfo({
     musicInfo: toggleMusicInfo,
     isRefresh,
     allowToggleSource: false,
   }) : Promise.reject(new Error('not found'))).catch(async() => {
-    return getMusicUrl({
+    return getMusicUrlInfo({
       musicInfo,
       isRefresh,
       onToggleSource(mInfo) {
@@ -139,10 +144,10 @@ export const setMusicUrl = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   if (cancelDelayRetry) cancelDelayRetry()
   global.lx.gettingUrlId = createGettingUrlId(musicInfo)
   const currentTimePromise = getPosition().catch(() => playerState.progress.nowPlayTime)
-  void getMusicPlayUrl(musicInfo, isRefresh).then(async(url) => {
-    if (!url) return
+  void getMusicPlayUrl(musicInfo, isRefresh).then(async(result) => {
+    if (!result) return
     const currentTime = await currentTimePromise
-    setResource(musicInfo, url, currentTime)
+    setResource(musicInfo, result.url, currentTime, result.quality)
   }).catch((err: any) => {
     console.log(err)
     setStatusText(err.message as string)

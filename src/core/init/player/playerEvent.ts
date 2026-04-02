@@ -59,7 +59,7 @@ export default () => {
 
   const handleLoadstart = () => {
     console.log('handleLoadstart', playerState.isPlay)
-    if (global.lx.isPlayedStop || !playerState.isPlay) return
+    if (global.lx.isPlayedStop || !playerState.musicInfo.id) return
     startLoadingTimeout()
     setStatusText(global.i18n.t('player__loading'))
   }
@@ -83,6 +83,7 @@ export default () => {
   }
 
   const handleWating = () => {
+    if (!global.lx.isPlayedStop && playerState.musicInfo.id) startLoadingTimeout()
     setStatusText(global.i18n.t('player__buffering'))
   }
 
@@ -131,6 +132,7 @@ export default () => {
   // global.app_event.on('playerLoadeddata', handleLoadeddata)
   // global.app_event.on('playerCanplay', handleCanplay)
   global.app_event.on('playerPlaying', handlePlaying)
+  global.app_event.on('playerPause', clearLoadingTimeout)
   global.app_event.on('playerWaiting', handleWating)
   global.app_event.on('playerEmptied', handleEmpied)
   global.app_event.on('playerError', handleError)

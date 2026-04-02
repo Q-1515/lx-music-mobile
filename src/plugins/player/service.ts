@@ -29,6 +29,10 @@ const handleExitApp = async(reason: string) => {
   exitApp(reason)
 }
 
+const shouldIgnoreTrackPlayerLifecycle = () => {
+  return Platform.OS == 'ios' && (isNativeFlacActive() || global.lx.playerStatus.ignoreTrackPlayerLifecycle)
+}
+
 
 const registerPlaybackService = async() => {
   if (isInitialized) return
@@ -77,7 +81,7 @@ const registerPlaybackService = async() => {
   // })
 
   TrackPlayer.addEventListener(TPEvent.PlaybackError, async(err: any) => {
-    if (Platform.OS == 'ios' && isNativeFlacActive()) return
+    if (shouldIgnoreTrackPlayerLifecycle()) return
     console.log('playback-error', err)
     global.app_event.error()
     global.app_event.playerError()
@@ -89,7 +93,7 @@ const registerPlaybackService = async() => {
   })
 
   TrackPlayer.addEventListener(TPEvent.PlaybackState, async info => {
-    if (Platform.OS == 'ios' && isNativeFlacActive()) return
+    if (shouldIgnoreTrackPlayerLifecycle()) return
     if (global.lx.gettingUrlId || isTempId()) return
     // let currentIsPlaying = false
 
@@ -127,7 +131,7 @@ const registerPlaybackService = async() => {
     // void updateMetaData(global.lx.store_playMusicInfo.musicInfo, currentIsPlaying)
   })
   TrackPlayer.addEventListener(TPEvent.PlaybackTrackChanged, async info => {
-    if (Platform.OS == 'ios' && isNativeFlacActive()) return
+    if (shouldIgnoreTrackPlayerLifecycle()) return
     // console.log('PlaybackTrackChanged====>', info)
     global.lx.playerTrackId = await getCurrentTrackId()
     if (info.track == null) return
@@ -196,7 +200,7 @@ const registerPlaybackService = async() => {
   })
   const playbackQueueEndedEvent = ((TPEvent as unknown as { PlaybackQueueEnded?: TPEvent }).PlaybackQueueEnded ?? 'playback-queue-ended') as TPEvent
   TrackPlayer.addEventListener(playbackQueueEndedEvent, async() => {
-    if (Platform.OS == 'ios' && isNativeFlacActive()) return
+    if (shouldIgnoreTrackPlayerLifecycle()) return
     if (Platform.OS != 'ios') return
     if (global.lx.gettingUrlId || isTempId()) return
     global.lx.playerTrackId = ''
@@ -246,6 +250,7 @@ const initNativeFlacEvents = () => {
           break
         }
         if (event.state == 'buffering') {
+          global.app_event.pause()
           global.app_event.playerWaiting()
           break
         }

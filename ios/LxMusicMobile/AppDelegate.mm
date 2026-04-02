@@ -2075,9 +2075,9 @@ RCT_EXPORT_MODULE();
   self.motionSamplingActive = YES;
   self.motionManager.deviceMotionUpdateInterval = MAX(self.sampleIntervalSeconds, 0.25);
 
-  __weak typeof(self) weakSelf = self;
+  __weak SmartSleepCloseModule *weakSelf = self;
   [self.motionManager startDeviceMotionUpdatesToQueue:self.motionQueue withHandler:^(CMDeviceMotion * _Nullable motion, NSError * _Nullable error) {
-    __strong typeof(weakSelf) strongSelf = weakSelf;
+    __strong SmartSleepCloseModule *strongSelf = weakSelf;
     if (strongSelf == nil) return;
     if (error != nil || motion == nil) {
       dispatch_async(strongSelf.monitorQueue, ^{
@@ -2187,9 +2187,9 @@ RCT_EXPORT_MODULE();
   self.checkTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self.monitorQueue);
   uint64_t interval = (uint64_t)(MAX(self.checkIntervalSeconds, 1) * NSEC_PER_SEC);
   dispatch_source_set_timer(self.checkTimer, dispatch_time(DISPATCH_TIME_NOW, interval), interval, (uint64_t)(0.5 * NSEC_PER_SEC));
-  __weak typeof(self) weakSelf = self;
+  __weak SmartSleepCloseModule *weakSelf = self;
   dispatch_source_set_event_handler(self.checkTimer, ^{
-    __strong typeof(weakSelf) strongSelf = weakSelf;
+    __strong SmartSleepCloseModule *strongSelf = weakSelf;
     if (strongSelf == nil) return;
     [strongSelf handleCheckLocked];
   });

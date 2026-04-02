@@ -76,10 +76,51 @@ const normalizePath = (path: string) => path.startsWith('file://')
 const getMusicInfo = (musicInfo: LX.Player.PlayMusic) => 'progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo
 const isRemoteUrl = (url: string) => /^https?:\/\//i.test(url)
 
+const getFileExt = (value: string) => /\.([a-z0-9]+)$/i.exec(value)?.[1]?.toLowerCase() ?? null
+
+const decodeSafe = (value: string) => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+const getContentDispositionExt = (url: string) => {
+  try {
+    const contentDisposition = new URL(url).searchParams.get('response-content-disposition')
+    if (!contentDisposition) return null
+
+    const filenameStarResult = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(contentDisposition)
+    if (filenameStarResult) {
+      const ext = getFileExt(decodeSafe(filenameStarResult[2].trim().replace(/^"|"$/g, '')))
+      if (ext) return ext
+    }
+
+    const filenameResult = /filename\s*=\s*("?)([^";]+)\1/i.exec(contentDisposition)
+    if (!filenameResult) return null
+    return getFileExt(decodeSafe(filenameResult[2].trim()))
+  } catch {
+    return null
+  }
+}
+
+const getUrlExt = (url: string) => {
+  const ext = /\.([a-z0-9]+)(?:$|[?#])/i.exec(url)?.[1]?.toLowerCase()
+  if (ext) return ext
+  return getContentDispositionExt(url)
+}
+
+const getActualExtHint = (musicInfo: LX.Player.PlayMusic, url: string) => {
+  const info = getMusicInfo(musicInfo)
+  if (info.source == 'local') return info.meta.ext?.toLowerCase() ?? null
+  return getUrlExt(url)
+}
+
 const getQualityExt = (musicInfo: LX.Player.PlayMusic, url: string) => {
   const info = getMusicInfo(musicInfo)
-  if (info.source == 'local') return info.meta.ext?.toLowerCase() || 'flac'
-  const ext = /\.([a-z0-9]+)(?:$|[?#])/i.exec(url)?.[1]?.toLowerCase()
+  if (info.source == 'local') return info.meta.ext?.toLowerCase() ?? 'flac'
+  const ext = getUrlExt(url)
   if (ext) return ext
   return preferredPreciseQualities.has(settingState.setting['player.playQuality']) ? 'flac' : 'mp3'
 }
@@ -153,8 +194,8 @@ export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: s
   if (!isNativeFlacPlayerAvailable()) return false
 
   const info = getMusicInfo(musicInfo)
-  const ext = getQualityExt(musicInfo, url)
-  if (ext == 'flac') return true
+  const actualExt = getActualExtHint(musicInfo, url)
+  if (actualExt != null) return actualExt == 'flac'
   if (quality != null) return preferredPreciseQualities.has(quality)
   if (info.source == 'local') return false
 

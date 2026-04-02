@@ -24,6 +24,8 @@ const defaultSetting: LX.AppSetting = {
   'player.playbackRate': 1,
   'player.cacheSize': '1024',
   'player.timeoutExit': '',
+  'player.timeoutExitCustomMinutes': '',
+  'player.timeoutExitTimerType': 'preset',
   'player.timeoutExitPlayed': true,
   'player.isAutoCleanPlayedList': false,
   'player.isHandleAudioFocus': true,

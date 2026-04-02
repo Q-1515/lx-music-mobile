@@ -78,6 +78,11 @@ export default forwardRef<ModalType, ModalProps>(({
   }))
 
   const memoChildren = useMemo(() => children, [children])
+  const content = (
+    <View style={{ flex: 1, backgroundColor: bgColor, paddingTop: statusBarPadding ? statusBarHeight : 0 }}>
+      {memoChildren}
+    </View>
+  )
 
   return (
     <Modal
@@ -91,11 +96,15 @@ export default forwardRef<ModalType, ModalProps>(({
     >
       {/* <StatusBar /> */}
       {/* <View style={{ flex: 1, paddingTop: statusBarPadding ? StatusBar.currentHeight : 0 }}> */}
-      <TouchableWithoutFeedback style={{ flex: 1, paddingTop: statusBarPadding ? statusBarHeight : 0 }} onPress={handleBgClose}>
-        <View style={{ flex: 1, backgroundColor: bgColor }}>
-          {memoChildren}
-        </View>
-      </TouchableWithoutFeedback>
+      {
+        bgHide
+          ? (
+              <TouchableWithoutFeedback onPress={handleBgClose}>
+                {content}
+              </TouchableWithoutFeedback>
+            )
+          : content
+      }
       {/* </View> */}
     </Modal>
   )

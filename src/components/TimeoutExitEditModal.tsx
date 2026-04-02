@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { FlatList, ScrollView, Switch, TouchableWithoutFeedback, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
+import { FlatList, SafeAreaView, ScrollView, Switch, TouchableWithoutFeedback, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 import Modal, { type ModalType } from '@/components/common/Modal'
 import Button from '@/components/common/Button'
 import Text from '@/components/common/Text'
@@ -17,16 +17,18 @@ import {
 import { useI18n } from '@/lang'
 import { useSettingValue } from '@/store/setting/hook'
 import { updateSetting } from '@/core/common'
-import settingState from '@/store/setting/state'
 import { isSmartSleepCloseSupported } from '@/utils/nativeModules/smartSleepClose'
+import { useStatusbarHeight } from '@/store/common/hook'
 
 const PRESET_MINUTES = [15, 30, 60, 90] as const
+const DEFAULT_CUSTOM_MINUTES = '10'
 const MAX_MIN = 1440
 const WHEEL_ITEM_HEIGHT = 54
 const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS
 
 type TimeoutOption = 'off' | 'smart' | number | 'custom'
+type TimeoutTimerType = 'preset' | 'custom'
 
 const HOURS = Array.from({ length: 25 }, (_, index) => index)
 const MINUTES = Array.from({ length: 60 }, (_, index) => index)
@@ -54,8 +56,11 @@ const formatClock = (time: number) => {
   return `${h.toString().padStart(2, '0')}:${m}:${s}`
 }
 
+const parsePositiveMinutes = (minutesText: string) => Math.max(parseInt(minutesText || '0') || 0, 0)
+const isPresetMinutes = (minutes: number) => (PRESET_MINUTES as readonly number[]).includes(minutes)
+
 const parseMinutes = (minutesText: string) => {
-  const minutes = Math.max(parseInt(minutesText || '0') || 0, 0)
+  const minutes = parsePositiveMinutes(minutesText)
   return {
     hours: Math.min(Math.trunc(minutes / 60), 24),
     minutes: Math.min(minutes % 60, 59),
@@ -68,14 +73,28 @@ const formatCustomLabel = (hours: number, minutes: number) => {
   return `${hours.toString().padStart(2, '0')} 小时 ${minutes.toString().padStart(2, '0')} 分钟`
 }
 
-const resolveActiveOption = (timeInfo: ReturnType<typeof useTimeInfo>, customMinutes: string): TimeoutOption => {
-  if (timeInfo.mode == 'smart') return 'smart'
-  if (timeInfo.mode != 'timer' || timeInfo.time < 0) return 'off'
+const resolveStoredCustomMinutes = (customMinutes: string, timeoutMinutes: string, timerType: TimeoutTimerType) => {
+  if (customMinutes) return customMinutes
 
-  const totalMinutes = Math.max(Math.round(timeInfo.time / 60), 0)
-  if ((PRESET_MINUTES as readonly number[]).includes(totalMinutes)) return totalMinutes
-  if (customMinutes && parseInt(customMinutes) == totalMinutes) return 'custom'
-  return totalMinutes > 0 ? 'custom' : 'off'
+  const totalMinutes = parsePositiveMinutes(timeoutMinutes)
+  if (!totalMinutes) return ''
+  if (timerType == 'custom' || !isPresetMinutes(totalMinutes)) return String(totalMinutes)
+  return ''
+}
+
+const resolveActiveOption = (
+  timeInfo: ReturnType<typeof useTimeInfo>,
+  timeoutMinutes: string,
+  timerType: TimeoutTimerType,
+): TimeoutOption => {
+  if (timeInfo.mode == 'smart') return 'smart'
+  if (timeInfo.mode != 'timer') return 'off'
+
+  const totalMinutes = parsePositiveMinutes(timeoutMinutes)
+  if (!totalMinutes) return 'off'
+  if (timerType == 'custom') return 'custom'
+  if (isPresetMinutes(totalMinutes)) return totalMinutes
+  return 'custom'
 }
 
 const Radio = ({ active }: { active: boolean }) => {
@@ -86,7 +105,7 @@ const Radio = ({ active }: { active: boolean }) => {
       borderColor: active ? theme['c-primary'] : theme['c-border-background'],
       backgroundColor: active ? theme['c-primary'] : 'transparent',
     }}>
-      {active ? <View style={{ ...styles.radioInner, backgroundColor: theme['c-button-font'] }} /> : null}
+      {active ? <View style={{ ...styles.radioInner, backgroundColor: theme['c-primary-light-1000'] }} /> : null}
     </View>
   )
 }
@@ -220,6 +239,7 @@ const WheelColumn = ({
       renderItem={renderItem}
       keyExtractor={(item) => String(item)}
       showsVerticalScrollIndicator={false}
+      nestedScrollEnabled
       snapToInterval={WHEEL_ITEM_HEIGHT}
       decelerationRate="fast"
       getItemLayout={(_, index) => ({ length: WHEEL_ITEM_HEIGHT, offset: WHEEL_ITEM_HEIGHT * index, index })}
@@ -257,15 +277,15 @@ const CustomTimePicker = ({
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.pickerBackdrop} />
       </TouchableWithoutFeedback>
-      <View style={{ ...styles.pickerPanel, ...getCardSurfaceStyle(theme) }}>
+      <SafeAreaView style={{ ...styles.pickerPanel, ...getCardSurfaceStyle(theme) }}>
         <View style={styles.pickerHeader}>
           <Text style={styles.pickerTitle} size={17}>{t('timeout_exit_custom_picker_title')}</Text>
           <Button style={{ ...styles.pickerConfirmBtn, backgroundColor: theme['c-primary'] }} onPress={onConfirm}>
-            <Text color={theme['c-button-font']} size={15}>{t('confirm')}</Text>
+            <Text color={theme['c-primary-light-1000']} size={15}>{t('confirm')}</Text>
           </Button>
         </View>
         <View style={styles.pickerBody}>
-          <View style={styles.wheelOverlay}>
+          <View style={styles.wheelOverlay} pointerEvents="none">
             <View style={{ ...styles.wheelOverlayHighlight, backgroundColor: theme['c-primary-input-background'] }} />
           </View>
           <View style={styles.wheelColumnWrap}>
@@ -277,7 +297,7 @@ const CustomTimePicker = ({
             <Text style={styles.wheelLabel} size={18}>{t('timeout_exit_min')}</Text>
           </View>
         </View>
-      </View>
+      </SafeAreaView>
     </View>
   )
 }
@@ -298,20 +318,25 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   const modalRef = useRef<ModalType>(null)
   const [visible, setVisible] = useState(false)
   const [customPickerVisible, setCustomPickerVisible] = useState(false)
-  const [customMinutes, setCustomMinutes] = useState(settingState.setting['player.timeoutExit'] || '')
-  const [pickerHours, setPickerHours] = useState(0)
-  const [pickerMinutes, setPickerMinutes] = useState(10)
+  const statusBarHeight = useStatusbarHeight()
+  const timeoutExitMinutes = useSettingValue('player.timeoutExit')
+  const timeoutExitCustomMinutes = useSettingValue('player.timeoutExitCustomMinutes')
+  const timeoutExitTimerType = useSettingValue('player.timeoutExitTimerType')
+  const storedCustomMinutes = useMemo(
+    () => resolveStoredCustomMinutes(timeoutExitCustomMinutes, timeoutExitMinutes, timeoutExitTimerType),
+    [timeoutExitCustomMinutes, timeoutExitMinutes, timeoutExitTimerType],
+  )
+  const [pickerHours, setPickerHours] = useState(() => parseMinutes(storedCustomMinutes || DEFAULT_CUSTOM_MINUTES).hours)
+  const [pickerMinutes, setPickerMinutes] = useState(() => parseMinutes(storedCustomMinutes || DEFAULT_CUSTOM_MINUTES).minutes)
   const timeoutExitPlayed = useSettingValue('player.timeoutExitPlayed')
   const cardSurfaceStyle = useMemo(() => getCardSurfaceStyle(theme), [theme])
 
   useEffect(() => {
     if (!visible) return
-    const nextCustomMinutes = settingState.setting['player.timeoutExit'] || ''
-    setCustomMinutes(nextCustomMinutes)
-    const { hours, minutes } = parseMinutes(nextCustomMinutes)
+    const { hours, minutes } = parseMinutes(storedCustomMinutes || DEFAULT_CUSTOM_MINUTES)
     setPickerHours(hours)
     setPickerMinutes(minutes)
-  }, [visible])
+  }, [storedCustomMinutes, visible])
 
   useImperativeHandle(ref, () => ({
     show() {
@@ -327,7 +352,10 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
     modalRef.current?.setVisible(false)
   }
 
-  const activeOption = useMemo(() => resolveActiveOption(timeInfo, customMinutes), [customMinutes, timeInfo])
+  const activeOption = useMemo(
+    () => resolveActiveOption(timeInfo, timeoutExitMinutes, timeoutExitTimerType),
+    [timeInfo, timeoutExitMinutes, timeoutExitTimerType],
+  )
 
   const stopAllModes = () => {
     cancelTimeoutExit()
@@ -343,11 +371,10 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   const handleSelectPreset = (minutes: number) => {
     stopAllModes()
     startTimeoutExit(minutes * 60)
-    updateSetting({ 'player.timeoutExit': String(minutes) })
-    setCustomMinutes(String(minutes))
-    const parsed = parseMinutes(String(minutes))
-    setPickerHours(parsed.hours)
-    setPickerMinutes(parsed.minutes)
+    updateSetting({
+      'player.timeoutExit': String(minutes),
+      'player.timeoutExitTimerType': 'preset',
+    })
     toast(t('timeout_exit_tip_on', { time: formatClock(minutes * 60) }))
   }
 
@@ -362,7 +389,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   }
 
   const handleOpenCustomPicker = () => {
-    const sourceMinutes = activeOption == 'custom' && customMinutes ? customMinutes : (settingState.setting['player.timeoutExit'] || customMinutes)
+    const sourceMinutes = storedCustomMinutes || DEFAULT_CUSTOM_MINUTES
     const parsed = parseMinutes(sourceMinutes)
     setPickerHours(parsed.hours)
     setPickerMinutes(parsed.minutes)
@@ -377,8 +404,11 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
     }
     stopAllModes()
     startTimeoutExit(totalMinutes * 60)
-    updateSetting({ 'player.timeoutExit': String(totalMinutes) })
-    setCustomMinutes(String(totalMinutes))
+    updateSetting({
+      'player.timeoutExit': String(totalMinutes),
+      'player.timeoutExitCustomMinutes': String(totalMinutes),
+      'player.timeoutExitTimerType': 'custom',
+    })
     setCustomPickerVisible(false)
     toast(t('timeout_exit_tip_on', { time: formatClock(totalMinutes * 60) }))
   }
@@ -388,18 +418,18 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   }
 
   const customValueText = useMemo(() => {
-    if (!customMinutes) return t('timeout_exit_option_custom_placeholder')
-    const { hours, minutes } = parseMinutes(customMinutes)
+    if (!storedCustomMinutes) return t('timeout_exit_option_custom_placeholder')
+    const { hours, minutes } = parseMinutes(storedCustomMinutes)
     return `${hours.toString().padStart(2, '0')} ${t('timeout_exit_hour')} ${minutes.toString().padStart(2, '0')} ${t('timeout_exit_min')}`
-  }, [customMinutes, t])
+  }, [storedCustomMinutes, t])
 
   return (
     visible
       ? (
-          <Modal ref={modalRef} onHide={() => { setVisible(false) }} bgColor={theme['c-main-background']}>
+          <Modal ref={modalRef} onHide={() => { setVisible(false) }} bgColor={theme['c-main-background']} bgHide={false}>
             <View style={styles.mask}>
-              <View style={{ ...styles.sheet, backgroundColor: theme['c-main-background'] }}>
-                <View style={styles.header}>
+              <SafeAreaView style={{ ...styles.sheet, backgroundColor: theme['c-main-background'] }}>
+                <View style={{ ...styles.header, paddingTop: 10 + statusBarHeight }}>
                   <Button style={styles.headerBtn} onPress={hide}>
                     <Icon name="back-2" color={theme['c-font']} size={15} />
                   </Button>
@@ -452,7 +482,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                     />
                   </View>
                 </ScrollView>
-              </View>
+              </SafeAreaView>
 
               <CustomTimePicker
                 visible={customPickerVisible}
@@ -492,7 +522,7 @@ const styles = createStyle({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontWeight: 600,
+    fontWeight: '600',
   },
   scroll: {
     flex: 1,
@@ -521,12 +551,12 @@ const styles = createStyle({
     fontSize: 34,
     lineHeight: 40,
     marginBottom: 10,
-    fontWeight: 600,
+    fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
   statusTitle: {
     marginBottom: 8,
-    fontWeight: 600,
+    fontWeight: '600',
     paddingRight: 72,
   },
   smartBadge: {
@@ -619,7 +649,7 @@ const styles = createStyle({
     marginBottom: 16,
   },
   pickerTitle: {
-    fontWeight: 600,
+    fontWeight: '600',
   },
   pickerConfirmBtn: {
     minWidth: 80,

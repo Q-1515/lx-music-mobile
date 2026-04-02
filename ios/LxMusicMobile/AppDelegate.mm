@@ -791,6 +791,8 @@ static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
 @property (nonatomic, copy) NSString *currentPath;
 @property (nonatomic, copy) NSString *currentState;
 @property (nonatomic, assign) BOOL hasListeners;
+@property (nonatomic, assign) BOOL manualPause;
+@property (nonatomic, assign) BOOL interruptedBySystem;
 @end
 
 @implementation FlacPlayerModule
@@ -805,8 +807,16 @@ RCT_EXPORT_MODULE();
   self = [super init];
   if (self != nil) {
     _currentState = @"idle";
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleAudioSessionInterruption:)
+                                                 name:AVAudioSessionInterruptionNotification
+                                               object:[AVAudioSession sharedInstance]];
   }
   return self;
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (NSArray<NSString *> *)supportedEvents {
@@ -892,6 +902,47 @@ RCT_EXPORT_MODULE();
   }
   self.currentPath = nil;
   self.currentState = @"idle";
+  self.manualPause = NO;
+  self.interruptedBySystem = NO;
+}
+
+- (void)handleAudioSessionInterruption:(NSNotification *)notification {
+  NSDictionary *userInfo = notification.userInfo;
+  if (userInfo == nil || self.player == nil) return;
+
+  AVAudioSessionInterruptionType type = (AVAudioSessionInterruptionType)[userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+  switch (type) {
+    case AVAudioSessionInterruptionTypeBegan: {
+      BOOL shouldHandle = self.player.isPlaying || [self.currentState isEqualToString:@"playing"];
+      if (!shouldHandle) return;
+      self.interruptedBySystem = !self.manualPause;
+      [self.player pause];
+      if (!self.manualPause) [self emitState:@"paused" position:nil duration:nil];
+      break;
+    }
+    case AVAudioSessionInterruptionTypeEnded: {
+      BOOL shouldResume = ([userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue] & AVAudioSessionInterruptionOptionShouldResume) != 0;
+      if (!self.interruptedBySystem || self.manualPause || !shouldResume) {
+        self.interruptedBySystem = NO;
+        return;
+      }
+
+      self.interruptedBySystem = NO;
+      NSError *sessionError = nil;
+      if (![self prepareAudioSession:&sessionError]) {
+        [self emitErrorMessage:sessionError.localizedDescription ?: @"Failed to reactivate audio session"];
+        return;
+      }
+      if ([self.player play]) {
+        [self emitState:@"playing" position:nil duration:nil];
+      } else {
+        [self emitErrorMessage:@"Failed to resume flac playback after interruption"];
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNumber *)position volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
@@ -914,6 +965,8 @@ RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNum
     self.player.volume = [volume floatValue];
     self.player.rate = MAX([rate floatValue], 0.5f);
     self.player.currentTime = LXClampDouble([position doubleValue], 0, self.player.duration);
+    self.manualPause = NO;
+    self.interruptedBySystem = NO;
 
     if (![self.player play]) {
       NSError *playError = LXError(@"flac_player_play", @"Failed to start flac playback");
@@ -954,6 +1007,8 @@ RCT_REMAP_METHOD(resume, resumeWithResolver:(RCTPromiseResolveBlock)resolve reje
       return;
     }
 
+    self.manualPause = NO;
+    self.interruptedBySystem = NO;
     [self emitState:@"playing" position:nil duration:nil];
     resolve(nil);
   });
@@ -961,6 +1016,8 @@ RCT_REMAP_METHOD(resume, resumeWithResolver:(RCTPromiseResolveBlock)resolve reje
 
 RCT_REMAP_METHOD(pause, pauseWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
+    self.manualPause = YES;
+    self.interruptedBySystem = NO;
     if (self.player != nil) [self.player pause];
     [self emitState:@"paused" position:nil duration:nil];
     resolve(nil);
@@ -969,6 +1026,8 @@ RCT_REMAP_METHOD(pause, pauseWithResolver:(RCTPromiseResolveBlock)resolve reject
 
 RCT_REMAP_METHOD(stop, stopWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
+    self.manualPause = YES;
+    self.interruptedBySystem = NO;
     if (self.player != nil) {
       [self.player stop];
       self.player.currentTime = 0;
@@ -1045,6 +1104,8 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 - (void)audioPlayerDidFinishPlaying:(AVAudioPlayer *)player successfully:(BOOL)flag {
   if (player != self.player) return;
+  self.manualPause = NO;
+  self.interruptedBySystem = NO;
   [self emitEventWithType:@"ended" body:@{
     @"state": @"stopped",
     @"position": @(player.duration),
@@ -1055,6 +1116,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 - (void)audioPlayerDecodeErrorDidOccur:(AVAudioPlayer *)player error:(NSError *)error {
   if (player != self.player) return;
+  self.interruptedBySystem = NO;
   self.currentState = @"paused";
   [self emitErrorMessage:error.localizedDescription ?: @"Flac decode failed"];
 }
@@ -1081,6 +1143,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) BOOL stopRequested;
 @property (nonatomic, assign) BOOL playbackStarted;
 @property (nonatomic, assign) BOOL manualPause;
+@property (nonatomic, assign) BOOL interruptedBySystem;
 @property (nonatomic, assign) double duration;
 @property (nonatomic, assign) double sampleRate;
 @property (nonatomic, assign) NSUInteger channels;
@@ -1144,8 +1207,16 @@ RCT_EXPORT_MODULE();
     _rangeChunkSize = 262144;
     _currentVolume = 1.0f;
     _currentRate = 1.0f;
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleAudioSessionInterruption:)
+                                                 name:AVAudioSessionInterruptionNotification
+                                               object:[AVAudioSession sharedInstance]];
   }
   return self;
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (NSArray<NSString *> *)supportedEvents {
@@ -1211,6 +1282,7 @@ RCT_EXPORT_MODULE();
   self.stopRequested = NO;
   self.playbackStarted = NO;
   self.manualPause = NO;
+  self.interruptedBySystem = NO;
   self.duration = 0;
   self.sampleRate = 0;
   self.channels = 0;
@@ -1229,6 +1301,71 @@ RCT_EXPORT_MODULE();
   self.streamLengthBytes = 0;
   self.startThresholdSeconds = self.normalStartThresholdSeconds;
   self.outputFormat = nil;
+}
+
+- (void)handleAudioSessionInterruption:(NSNotification *)notification {
+  NSDictionary *userInfo = notification.userInfo;
+  if (userInfo == nil || self.currentURL.length == 0) return;
+
+  AVAudioSessionInterruptionType type = (AVAudioSessionInterruptionType)[userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+  switch (type) {
+    case AVAudioSessionInterruptionTypeBegan: {
+      __block BOOL shouldEmitPause = NO;
+      dispatch_sync(self.renderQueue, ^{
+        BOOL shouldHandle = self.playerNode != nil && (self.playerNode.isPlaying || self.playbackStarted || [self.currentState isEqualToString:@"buffering"]);
+        if (!shouldHandle || self.manualPause) return;
+        self.lastKnownPosition = [self currentPlaybackPositionLocked];
+        [self.playerNode pause];
+        self.playbackStarted = NO;
+        shouldEmitPause = YES;
+      });
+      if (!shouldEmitPause) return;
+      self.interruptedBySystem = YES;
+      self.currentState = @"paused";
+      [self emitState:@"paused" position:@(self.lastKnownPosition) duration:@(self.duration)];
+      break;
+    }
+    case AVAudioSessionInterruptionTypeEnded: {
+      BOOL shouldResume = ([userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue] & AVAudioSessionInterruptionOptionShouldResume) != 0;
+      if (!self.interruptedBySystem || self.manualPause || !shouldResume) {
+        self.interruptedBySystem = NO;
+        return;
+      }
+
+      self.interruptedBySystem = NO;
+      NSError *sessionError = nil;
+      if (![self prepareAudioSession:&sessionError]) {
+        [self emitErrorMessage:sessionError.localizedDescription ?: @"Failed to reactivate audio session"];
+        return;
+      }
+
+      __block NSError *engineError = nil;
+      __block BOOL didResumePlaying = NO;
+      __block BOOL shouldEmitBuffering = NO;
+      dispatch_sync(self.renderQueue, ^{
+        if (self.engine != nil && !self.engine.isRunning) {
+          if (![self.engine startAndReturnError:&engineError]) return;
+        }
+        self.manualPause = NO;
+        [self maybeStartPlaybackLocked];
+        didResumePlaying = self.playbackStarted;
+        if (!didResumePlaying) {
+          self.currentState = @"buffering";
+          shouldEmitBuffering = YES;
+        }
+      });
+      if (engineError != nil) {
+        [self emitErrorMessage:engineError.localizedDescription ?: @"Failed to restart audio engine after interruption"];
+        return;
+      }
+      if (shouldEmitBuffering) {
+        [self emitState:@"buffering" position:@(self.lastKnownPosition) duration:@(self.duration)];
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 - (void)cleanupAudioGraphLocked {
@@ -1649,6 +1786,8 @@ RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDiction
     self.currentState = @"loading";
     self.currentVolume = [volume floatValue];
     self.currentRate = MAX([rate floatValue], 0.5f);
+    self.manualPause = NO;
+    self.interruptedBySystem = NO;
     self.requestHeaders = [headers isKindOfClass:[NSDictionary class]] ? [headers copy] : @{};
     [self emitState:@"loading" position:@0 duration:@0];
 
@@ -1667,6 +1806,7 @@ RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDiction
 RCT_REMAP_METHOD(resume, resumeStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_sync(self.renderQueue, ^{
     self.manualPause = NO;
+    self.interruptedBySystem = NO;
     [self maybeStartPlaybackLocked];
   });
   resolve(nil);
@@ -1676,6 +1816,7 @@ RCT_REMAP_METHOD(pause, pauseStreamWithResolver:(RCTPromiseResolveBlock)resolve 
   dispatch_sync(self.renderQueue, ^{
     self.lastKnownPosition = [self currentPlaybackPositionLocked];
     self.manualPause = YES;
+    self.interruptedBySystem = NO;
     [self.playerNode pause];
     self.playbackStarted = NO;
   });
@@ -1684,6 +1825,8 @@ RCT_REMAP_METHOD(pause, pauseStreamWithResolver:(RCTPromiseResolveBlock)resolve 
 }
 
 RCT_REMAP_METHOD(stop, stopStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  self.manualPause = YES;
+  self.interruptedBySystem = NO;
   [self stopStreamingInternal:YES];
   self.currentState = @"stopped";
   [self emitState:@"stopped" position:@0 duration:@(self.duration)];

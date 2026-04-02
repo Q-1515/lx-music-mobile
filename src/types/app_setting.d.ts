@@ -150,6 +150,8 @@ declare global {
        * 定时暂停播放-倒计时时间
        */
       'player.timeoutExit': string
+      'player.timeoutExitCustomMinutes': string
+      'player.timeoutExitTimerType': 'preset' | 'custom'
 
       /**
        * 定时暂停播放-是否等待歌曲播放完毕再暂停

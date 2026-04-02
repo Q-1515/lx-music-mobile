@@ -2425,6 +2425,8 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, strong) UIView *selectionOverlay;
 @property (nonatomic, strong) UILabel *hourOverlayLabel;
 @property (nonatomic, strong) UILabel *minuteOverlayLabel;
+@property (nonatomic, strong) UILabel *hourValueOverlayLabel;
+@property (nonatomic, strong) UILabel *minuteValueOverlayLabel;
 @property (nonatomic, assign) NSInteger selectedMinuteRow;
 @property (nonatomic, copy) void (^onConfirm)(NSInteger totalMinutes);
 @property (nonatomic, copy) void (^onCancel)(void);
@@ -2525,7 +2527,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
   self.selectionOverlay = [[UIView alloc] init];
   self.selectionOverlay.userInteractionEnabled = NO;
-  self.selectionOverlay.backgroundColor = [UIColor colorWithWhite:0.95 alpha:0.96];
+  self.selectionOverlay.backgroundColor = [UIColor colorWithWhite:0.95 alpha:0.98];
   self.selectionOverlay.layer.cornerRadius = 18;
 
   self.hourOverlayLabel = [[UILabel alloc] init];
@@ -2540,11 +2542,23 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   self.minuteOverlayLabel.textColor = [UIColor labelColor];
   self.minuteOverlayLabel.textAlignment = NSTextAlignmentCenter;
 
+  self.hourValueOverlayLabel = [[UILabel alloc] init];
+  self.hourValueOverlayLabel.font = [UIFont monospacedDigitSystemFontOfSize:24 weight:UIFontWeightRegular];
+  self.hourValueOverlayLabel.textColor = [UIColor labelColor];
+  self.hourValueOverlayLabel.textAlignment = NSTextAlignmentCenter;
+
+  self.minuteValueOverlayLabel = [[UILabel alloc] init];
+  self.minuteValueOverlayLabel.font = [UIFont monospacedDigitSystemFontOfSize:24 weight:UIFontWeightRegular];
+  self.minuteValueOverlayLabel.textColor = [UIColor labelColor];
+  self.minuteValueOverlayLabel.textAlignment = NSTextAlignmentCenter;
+
   [self.pickerView addSubview:self.selectionOverlay];
+  [self.selectionOverlay addSubview:self.hourValueOverlayLabel];
+  [self.selectionOverlay addSubview:self.minuteValueOverlayLabel];
+  [self.selectionOverlay addSubview:self.hourOverlayLabel];
+  [self.selectionOverlay addSubview:self.minuteOverlayLabel];
   [self.sheetView addSubview:self.headerView];
   [self.sheetView addSubview:self.pickerView];
-  [self.sheetView addSubview:self.hourOverlayLabel];
-  [self.sheetView addSubview:self.minuteOverlayLabel];
 
   UILayoutGuide *safeArea = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
@@ -2581,6 +2595,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   [self.pickerView reloadComponent:1];
   self.selectedMinuteRow = [self loopedMinuteRowForValue:self.selectedMinutes hour:self.selectedHours];
   [self.pickerView selectRow:self.selectedMinuteRow inComponent:1 animated:NO];
+  [self updateOverlayLabels];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -2592,15 +2607,11 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   CGFloat overlayY = floor((CGRectGetHeight(self.pickerView.bounds) - overlayHeight) / 2.0);
   self.selectionOverlay.frame = CGRectMake(overlayX, overlayY, overlayWidth, overlayHeight);
 
-  CGFloat pickerMinX = CGRectGetMinX(self.pickerView.frame);
-  CGFloat pickerWidth = CGRectGetWidth(self.pickerView.frame);
-  CGFloat componentWidth = [self pickerView:self.pickerView widthForComponent:0];
-  CGFloat leftComponentCenterX = pickerMinX + pickerWidth * 0.25;
-  CGFloat rightComponentCenterX = pickerMinX + pickerWidth * 0.75;
-  CGFloat overlayCenterY = CGRectGetMidY(self.pickerView.frame);
-
-  self.hourOverlayLabel.frame = CGRectMake(leftComponentCenterX + componentWidth * 0.18, overlayCenterY - 22, 64, 44);
-  self.minuteOverlayLabel.frame = CGRectMake(rightComponentCenterX + componentWidth * 0.18, overlayCenterY - 22, 64, 44);
+  CGFloat contentY = floor((overlayHeight - 44) / 2.0);
+  self.hourValueOverlayLabel.frame = CGRectMake(48, contentY, 36, 44);
+  self.hourOverlayLabel.frame = CGRectMake(84, contentY, 64, 44);
+  self.minuteValueOverlayLabel.frame = CGRectMake(CGRectGetWidth(self.selectionOverlay.bounds) / 2.0 + 10, contentY, 48, 44);
+  self.minuteOverlayLabel.frame = CGRectMake(CGRectGetMaxX(self.minuteValueOverlayLabel.frame) + 4, contentY, 64, 44);
 }
 
 - (NSInteger)numberOfComponentsInPickerView:(UIPickerView *)pickerView {
@@ -2625,6 +2636,11 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   return [NSString stringWithFormat:@"%ld", (long)displayValue];
 }
 
+- (void)updateOverlayLabels {
+  self.hourValueOverlayLabel.text = [NSString stringWithFormat:@"%ld", (long)self.selectedHours];
+  self.minuteValueOverlayLabel.text = [NSString stringWithFormat:@"%ld", (long)self.selectedMinutes];
+}
+
 - (void)pickerView:(UIPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
   if (component == 0) {
     self.selectedHours = row;
@@ -2634,6 +2650,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
     self.selectedMinuteRow = [self loopedMinuteRowForValue:self.selectedMinutes hour:self.selectedHours];
     [pickerView selectRow:self.selectedMinuteRow inComponent:1 animated:NO];
     [pickerView reloadComponent:0];
+    [self updateOverlayLabels];
     return;
   }
   self.selectedMinutes = [self minuteValueForRow:row hour:self.selectedHours];
@@ -2648,6 +2665,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
     }
   }
   [pickerView reloadComponent:1];
+  [self updateOverlayLabels];
 }
 
 - (void)finishWithCancel {

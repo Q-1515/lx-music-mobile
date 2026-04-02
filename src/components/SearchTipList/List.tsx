@@ -1,5 +1,5 @@
 import { useState, useRef, useImperativeHandle, forwardRef, type Ref } from 'react'
-import { FlatList, type FlatListProps } from 'react-native'
+import { FlatList, Platform, type FlatListProps } from 'react-native'
 
 // import InsetShadow from 'react-native-inset-shadow'
 
@@ -31,7 +31,17 @@ const List = <T extends ItemT<T>>(props: ListProps<T>, ref: Ref<ListType<T>>) =>
     },
   }))
 
-  return <FlatList ref={flatListRef} removeClippedSubviews={true} keyboardShouldPersistTaps={'always'} {...props} data={list} />
+  return (
+    <FlatList
+      ref={flatListRef}
+      removeClippedSubviews={false}
+      automaticallyAdjustContentInsets={false}
+      contentInsetAdjustmentBehavior={Platform.OS == 'ios' ? 'never' : undefined}
+      keyboardShouldPersistTaps={'always'}
+      {...props}
+      data={list}
+    />
+  )
 }
 
 export default forwardRef(List) as

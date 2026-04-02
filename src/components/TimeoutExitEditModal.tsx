@@ -1,15 +1,14 @@
-import { useRef, useImperativeHandle, forwardRef, useState, useEffect } from 'react'
-import ConfirmAlert, { type ConfirmAlertType } from '@/components/common/ConfirmAlert'
-import Text from '@/components/common/Text'
-import { View } from 'react-native'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { ScrollView, Switch, View } from 'react-native'
+import Modal, { type ModalType } from '@/components/common/Modal'
+import Button from '@/components/common/Button'
 import Input, { type InputType } from '@/components/common/Input'
+import Text from '@/components/common/Text'
+import { Icon } from '@/components/common/Icon'
 import { createStyle, toast } from '@/utils/tools'
 import { useTheme } from '@/store/theme/hook'
-import Button from '@/components/common/Button'
 import {
   cancelTimeoutExit,
-  getTimeoutExitTime,
-  onTimeUpdate,
   startSmartTimeoutExit,
   startTimeoutExit,
   stopSmartTimeoutExit,
@@ -17,325 +16,435 @@ import {
   useTimeoutExitTimeInfo,
 } from '@/core/player/timeoutExit'
 import { useI18n } from '@/lang'
-import CheckBox from './common/CheckBox'
 import { useSettingValue } from '@/store/setting/hook'
 import { updateSetting } from '@/core/common'
 import settingState from '@/store/setting/state'
 import { isSmartSleepCloseSupported } from '@/utils/nativeModules/smartSleepClose'
 
+const PRESET_MINUTES = [15, 30, 60, 90] as const
 const MAX_MIN = 1440
-const rxp = /([1-9]\d*)/
+const timeInputRxp = /([1-9]\d*)/
+
 const formatTime = (time: number) => {
-  // let d = parseInt(time / 86400)
-  // d = d ? d.toString() + ':' : ''
-  // time = time % 86400
-  let h = Math.trunc(time / 3600)
-  let hStr = h ? h.toString() + ':' : ''
-  time = time % 3600
-  const m = Math.trunc(time / 60).toString().padStart(2, '0')
-  const s = Math.trunc(time % 60).toString().padStart(2, '0')
-  return `${hStr}${m}:${s}`
+  const safeTime = Math.max(time, 0)
+  const h = Math.trunc(safeTime / 3600)
+  const m = Math.trunc((safeTime % 3600) / 60).toString().padStart(2, '0')
+  const s = Math.trunc(safeTime % 60).toString().padStart(2, '0')
+  return `${h.toString().padStart(2, '0')}:${m}:${s}`
 }
-const Status = () => {
+
+type TimeoutOption = 'off' | 'smart' | number | 'custom'
+
+const resolveActiveOption = (timeInfo: ReturnType<typeof useTimeInfo>, customMinutes: string): TimeoutOption => {
+  if (timeInfo.mode == 'smart') return 'smart'
+  if (timeInfo.mode != 'timer' || timeInfo.time < 0) return 'off'
+
+  const totalMinutes = Math.max(Math.round(timeInfo.time / 60), 0)
+  if ((PRESET_MINUTES as readonly number[]).includes(totalMinutes)) return totalMinutes
+  if (customMinutes && parseInt(customMinutes) == totalMinutes) return 'custom'
+  return totalMinutes > 0 ? 'custom' : 'off'
+}
+
+const Radio = ({ active }: { active: boolean }) => {
   const theme = useTheme()
-  const t = useI18n()
-  const exitTimeInfo = useTimeoutExitTimeInfo()
-  const statusText = exitTimeInfo.mode == 'smart'
-    ? t(exitTimeInfo.smartState == 'collecting_motion' ? 'timeout_exit_tip_smart_collecting' : 'timeout_exit_tip_smart_waiting')
-    : exitTimeInfo.time < 0
-      ? t('timeout_exit_tip_off')
-      : t('timeout_exit_tip_on', { time: formatTime(exitTimeInfo.time) })
   return (
-    <View style={styles.tip}>
-      <Text>{statusText}</Text>
-      {exitTimeInfo.isPlayedStop ? <Text color={theme['c-font-label']} size={13}>{t('timeout_exit_btn_wait_tip')}</Text> : null}
+    <View style={{
+      ...styles.radio,
+      borderColor: active ? theme['c-primary'] : theme['c-border-background'],
+      backgroundColor: active ? theme['c-primary'] : 'transparent',
+    }}>
+      {active ? <View style={{ ...styles.radioInner, backgroundColor: theme['c-button-font'] }} /> : null}
     </View>
   )
 }
 
-
-interface TimeInputType {
-  setText: (text: string) => void
-  getText: () => string
-  focus: () => void
-}
-const TimeInput = forwardRef<TimeInputType, {}>((props, ref) => {
+const SectionTitle = ({ title }: { title: string }) => {
   const theme = useTheme()
-  const [text, setText] = useState('')
-  const inputRef = useRef<InputType>(null)
-  const t = useI18n()
-
-  useImperativeHandle(ref, () => ({
-    getText() {
-      return text.trim()
-    },
-    setText(text) {
-      setText(text)
-    },
-    focus() {
-      inputRef.current?.focus()
-    },
-  }))
-
-  return (
-    <Input
-      ref={inputRef}
-      placeholder={t('timeout_exit_input_tip')}
-      value={text}
-      onChangeText={setText}
-      style={{ ...styles.input, backgroundColor: theme['c-primary-input-background'] }}
-    />
-  )
-})
-
-
-const Setting = () => {
-  const t = useI18n()
-  const timeoutExitPlayed = useSettingValue('player.timeoutExitPlayed')
-  const onCheckChange = (check: boolean) => {
-    updateSetting({ 'player.timeoutExitPlayed': check })
-  }
-
-  return (
-    <View style={styles.checkbox}>
-      <CheckBox check={timeoutExitPlayed} label={t('timeout_exit_label_isPlayed')} onChange={onCheckChange} />
-    </View>
-  )
+  return <Text style={styles.sectionTitle} color={theme['c-font-label']}>{title}</Text>
 }
 
-const SmartClose = ({ mode }: { mode: ReturnType<typeof useTimeInfo>['mode'] }) => {
-  const t = useI18n()
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 10 },
+  shadowOpacity: 0.08,
+  shadowRadius: 20,
+  elevation: 4,
+} as const
+
+const OptionRow = ({
+  label,
+  desc,
+  active,
+  onPress,
+  borderless = false,
+}: {
+  label: string
+  desc?: string
+  active: boolean
+  onPress: () => void
+  borderless?: boolean
+}) => {
   const theme = useTheme()
-  const supported = isSmartSleepCloseSupported()
-
-  const handlePress = () => {
-    if (!supported) {
-      toast(t('timeout_exit_tip_smart_unsupported'))
-      return
-    }
-    if (mode == 'smart') {
-      stopSmartTimeoutExit()
-      toast(t('timeout_exit_tip_smart_off'))
-    } else {
-      startSmartTimeoutExit()
-      toast(t('timeout_exit_tip_smart_on'))
-    }
-  }
-
   return (
-    <View style={styles.smartClose}>
-      <Button style={{ ...styles.smartCloseBtn, backgroundColor: theme['c-button-background'] }} onPress={handlePress}>
-        <Text color={theme['c-button-font']}>{t(mode == 'smart' ? 'timeout_exit_btn_smart_stop' : 'timeout_exit_btn_smart_start')}</Text>
-      </Button>
-    </View>
+    <Button
+      onPress={onPress}
+      style={{
+        ...styles.optionRow,
+        borderBottomColor: borderless ? 'transparent' : theme['c-border-background'],
+      }}
+    >
+      <View style={styles.optionText}>
+        <Text size={16}>{label}</Text>
+        {desc ? <Text style={styles.optionDesc} size={13} color={theme['c-font-label']}>{desc}</Text> : null}
+      </View>
+      <Radio active={active} />
+    </Button>
   )
 }
 
-export const useTimeInfo = () => {
-  const [exitTimeInfo, setExitTimeInfo] = useState({
-    cancelText: '',
-    confirmText: '',
-    isPlayedStop: false,
-    active: false,
-    mode: 'off' as const,
-    smartState: 'idle' as const,
-  })
+const StatusCard = ({ timeInfo }: { timeInfo: ReturnType<typeof useTimeInfo> }) => {
+  const theme = useTheme()
   const t = useI18n()
 
-  useEffect(() => {
-    let active: boolean | null = null
-    const remove = onTimeUpdate(({ time, isPlayedStop, mode, smartState, active: isActive }) => {
-      if (!isActive) {
-        if (active) {
-          setExitTimeInfo({
-            cancelText: '',
-            confirmText: '',
-            isPlayedStop,
-            active: false,
-            mode,
-            smartState,
-          })
-          active = false
-        }
-      } else {
-        if (active !== true) {
-          setExitTimeInfo({
-            cancelText: isPlayedStop
-              ? t('timeout_exit_btn_wait_cancel')
-              : mode == 'timer'
-                ? t('timeout_exit_btn_cancel')
-                : mode == 'smart'
-                  ? t('timeout_exit_btn_smart_stop')
-                  : '',
-            confirmText: mode == 'timer' ? t('timeout_exit_btn_update') : '',
-            isPlayedStop,
-            active: true,
-            mode,
-            smartState,
-          })
-          active = true
-        } else {
-          setExitTimeInfo({
-            cancelText: isPlayedStop
-              ? t('timeout_exit_btn_wait_cancel')
-              : mode == 'timer'
-                ? t('timeout_exit_btn_cancel')
-                : mode == 'smart'
-                  ? t('timeout_exit_btn_smart_stop')
-                  : '',
-            confirmText: mode == 'timer' ? t('timeout_exit_btn_update') : '',
-            isPlayedStop,
-            active: true,
-            mode,
-            smartState,
-          })
-        }
+  const statusLabel = timeInfo.isPlayedStop
+    ? t('timeout_exit_btn_wait_tip')
+    : timeInfo.mode == 'smart'
+      ? t(timeInfo.smartState == 'collecting_motion' ? 'timeout_exit_tip_smart_collecting' : 'timeout_exit_tip_smart_waiting')
+      : timeInfo.mode == 'timer' && timeInfo.time >= 0
+        ? t('timeout_exit_status_on')
+        : t('timeout_exit_status_off')
+
+  return (
+    <View style={{ ...styles.statusCard, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+      {
+        timeInfo.mode == 'smart'
+          ? (
+              <>
+                <View style={{ ...styles.smartBadge, backgroundColor: theme['c-primary-alpha-900'] }}>
+                  <Icon name="music_time" color={theme['c-button-font']} size={18} />
+                </View>
+                <Text size={24} style={styles.statusTitle}>{t('timeout_exit_smart_title')}</Text>
+                <Text size={14} color={theme['c-font-label']}>{statusLabel}</Text>
+              </>
+            )
+          : (
+              <>
+                <Text style={styles.countdownText} color={theme['c-font-label']}>{formatTime(timeInfo.time > -1 ? timeInfo.time : 0)}</Text>
+                <Text size={16} color={theme['c-font-label']}>{statusLabel}</Text>
+              </>
+            )
       }
-    })
-
-    return () => {
-      remove()
-    }
-  }, [t])
-
-  return exitTimeInfo
+    </View>
+  )
 }
+
+export const useTimeInfo = useTimeoutExitTimeInfo
 
 export interface TimeoutExitEditModalType {
   show: () => void
 }
+
 interface TimeoutExitEditModalProps {
   timeInfo: ReturnType<typeof useTimeInfo>
 }
 
 export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>(({ timeInfo }, ref) => {
-  const alertRef = useRef<ConfirmAlertType>(null)
-  const timeInputRef = useRef<TimeInputType>(null)
-  const [visible, setVisible] = useState(false)
+  const theme = useTheme()
   const t = useI18n()
+  const modalRef = useRef<ModalType>(null)
+  const customInputRef = useRef<InputType>(null)
+  const [visible, setVisible] = useState(false)
+  const [customMinutes, setCustomMinutes] = useState(settingState.setting['player.timeoutExit'] || '')
+  const timeoutExitPlayed = useSettingValue('player.timeoutExitPlayed')
 
-  const handleShow = () => {
-    alertRef.current?.setVisible(true)
-    requestAnimationFrame(() => {
-      if (settingState.setting['player.timeoutExit']) timeInputRef.current?.setText(settingState.setting['player.timeoutExit'])
-      //   setTimeout(() => {
-      //     timeInputRef.current?.focus()
-      //   }, 300)
-    })
-  }
+  useEffect(() => {
+    if (!visible) return
+    setCustomMinutes(settingState.setting['player.timeoutExit'] || '')
+  }, [visible])
+
   useImperativeHandle(ref, () => ({
     show() {
-      if (visible) handleShow()
-      else {
-        setVisible(true)
-        requestAnimationFrame(() => {
-          handleShow()
-        })
-      }
+      setVisible(true)
+      requestAnimationFrame(() => {
+        modalRef.current?.setVisible(true)
+      })
     },
   }))
 
-  const handleCancel = () => {
-    if (timeInfo.isPlayedStop) {
-      cancelTimeoutExit()
-      return
-    }
-    if (timeInfo.mode == 'smart') {
-      stopSmartTimeoutExit()
-      toast(t('timeout_exit_tip_smart_off'))
-      return
-    }
-    if (!timeInfo.active) return
+  const hide = () => {
+    modalRef.current?.setVisible(false)
+  }
+
+  const activeOption = useMemo(() => resolveActiveOption(timeInfo, customMinutes), [customMinutes, timeInfo])
+
+  const stopAllModes = () => {
+    cancelTimeoutExit()
     stopTimeoutExit()
+    stopSmartTimeoutExit()
+  }
+
+  const handleSelectOff = () => {
+    stopAllModes()
     toast(t('timeout_exit_tip_cancel'))
   }
-  const handleConfirm = () => {
-    let timeStr = timeInputRef.current?.getText() ?? ''
-    if (rxp.test(timeStr)) {
-      // if (timeStr != RegExp.$1) toast(t('input_error'))
-      timeStr = RegExp.$1
-      if (parseInt(timeStr) > MAX_MIN) {
-        toast(t('timeout_exit_tip_max', { num: MAX_MIN }))
-        // timeStr = timeStr.substring(0, timeStr.length - 1)
-        return
-      }
-    } else {
-      if (timeStr.length) toast(t('input_error'))
-      timeStr = ''
+
+  const handleSelectPreset = (minutes: number) => {
+    stopAllModes()
+    startTimeoutExit(minutes * 60)
+    updateSetting({ 'player.timeoutExit': String(minutes) })
+    setCustomMinutes(String(minutes))
+    toast(t('timeout_exit_tip_on', { time: formatTime(minutes * 60) }))
+  }
+
+  const handleSelectSmart = () => {
+    if (!isSmartSleepCloseSupported()) {
+      toast(t('timeout_exit_tip_smart_unsupported'))
+      return
     }
-    if (!timeStr) return
-    const time = parseInt(timeStr)
-    cancelTimeoutExit()
-    startTimeoutExit(time * 60)
-    toast(t('timeout_exit_tip_on', { time: formatTime(getTimeoutExitTime()) }))
-    updateSetting({ 'player.timeoutExit': String(time) })
-    alertRef.current?.setVisible(false)
+    stopAllModes()
+    startSmartTimeoutExit()
+    toast(t('timeout_exit_tip_smart_on'))
+  }
+
+  const handleApplyCustom = () => {
+    let timeStr = customMinutes.trim()
+    if (!timeInputRxp.test(timeStr)) {
+      if (timeStr.length) toast(t('input_error'))
+      return
+    }
+    timeStr = RegExp.$1
+    const minutes = parseInt(timeStr)
+    if (minutes > MAX_MIN) {
+      toast(t('timeout_exit_tip_max', { num: MAX_MIN }))
+      return
+    }
+    stopAllModes()
+    startTimeoutExit(minutes * 60)
+    updateSetting({ 'player.timeoutExit': String(minutes) })
+    setCustomMinutes(String(minutes))
+    toast(t('timeout_exit_tip_on', { time: formatTime(minutes * 60) }))
+  }
+
+  const handleToggleFinishCurrent = (value: boolean) => {
+    updateSetting({ 'player.timeoutExitPlayed': value })
   }
 
   return (
     visible
-      ? <ConfirmAlert
-          ref={alertRef}
-          cancelText={timeInfo.cancelText}
-          confirmText={timeInfo.confirmText}
-          showConfirm={timeInfo.mode != 'smart'}
-          onCancel={handleCancel}
-          onConfirm={handleConfirm}
-        >
-          <View style={styles.alertContent}>
-            <Status />
-            <SmartClose mode={timeInfo.mode} />
-            <View style={styles.inputContent}>
-              <TimeInput ref={timeInputRef} />
-              <Text style={styles.inputLabel}>{t('timeout_exit_min')}</Text>
+      ? (
+          <Modal ref={modalRef} onHide={() => { setVisible(false) }} bgColor="rgba(35, 35, 35, .32)">
+            <View style={styles.mask}>
+              <View style={{ ...styles.sheet, backgroundColor: theme['c-main-background'] }}>
+                <View style={styles.header}>
+                  <Button style={styles.headerBtn} onPress={hide}>
+                    <Icon name="back-2" color={theme['c-font']} size={15} />
+                  </Button>
+                  <Text style={styles.headerTitle} size={18}>{t('timeout_exit_page_title')}</Text>
+                  <View style={styles.headerBtn} />
+                </View>
+
+                <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="always">
+                  <SectionTitle title={t('timeout_exit_section_countdown')} />
+                  <StatusCard timeInfo={timeInfo} />
+
+                  <SectionTitle title={t('timeout_exit_section_select')} />
+                  <View style={{ ...styles.card, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+                    <OptionRow label={t('timeout_exit_option_off')} active={activeOption == 'off'} onPress={handleSelectOff} />
+                    {PRESET_MINUTES.map((minutes) => (
+                      <OptionRow
+                        key={minutes}
+                        label={t('timeout_exit_option_minutes', { minutes })}
+                        active={activeOption == minutes}
+                        onPress={() => { handleSelectPreset(minutes) }}
+                      />
+                    ))}
+                    <OptionRow label={t('timeout_exit_option_custom')} active={activeOption == 'custom'} onPress={() => { customInputRef.current?.focus() }} borderless />
+                  </View>
+
+                  <View style={{ ...styles.card, ...styles.customCard, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+                    <Input
+                      ref={customInputRef}
+                      value={customMinutes}
+                      onChangeText={setCustomMinutes}
+                      keyboardType="number-pad"
+                      placeholder={t('timeout_exit_input_tip')}
+                      style={{ ...styles.customInput, backgroundColor: theme['c-primary-input-background'] }}
+                    />
+                    <Button style={{ ...styles.applyBtn, backgroundColor: theme['c-button-background'] }} onPress={handleApplyCustom}>
+                      <Text color={theme['c-button-font']}>{t('confirm')}</Text>
+                    </Button>
+                  </View>
+
+                  <View style={{ ...styles.card, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+                    <OptionRow
+                      label={t('timeout_exit_option_smart')}
+                      desc={t('timeout_exit_option_smart_desc')}
+                      active={activeOption == 'smart'}
+                      onPress={handleSelectSmart}
+                      borderless
+                    />
+                  </View>
+
+                  <SectionTitle title={t('timeout_exit_section_other')} />
+                  <View style={{ ...styles.card, ...styles.switchCard, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+                    <View style={styles.switchText}>
+                      <Text size={16}>{t('timeout_exit_label_isPlayed')}</Text>
+                      <Text style={styles.optionDesc} size={13} color={theme['c-font-label']}>{t('timeout_exit_label_isPlayed_desc')}</Text>
+                    </View>
+                    <Switch
+                      value={timeoutExitPlayed}
+                      onValueChange={handleToggleFinishCurrent}
+                      trackColor={{ false: theme['c-primary-light-400-alpha-300'], true: theme['c-primary-alpha-800'] }}
+                      thumbColor={theme['c-button-font']}
+                      ios_backgroundColor={theme['c-primary-light-400-alpha-300']}
+                    />
+                  </View>
+                </ScrollView>
+              </View>
             </View>
-            <Setting />
-          </View>
-        </ConfirmAlert>
+          </Modal>
+        )
       : null
   )
 })
 
 const styles = createStyle({
-  alertContent: {
-    flexShrink: 1,
-    flexDirection: 'column',
-  },
-  tip: {
-    marginBottom: 8,
-  },
-  checkbox: {
-    marginTop: 5,
-  },
-  smartClose: {
-    marginTop: 4,
-    marginBottom: 8,
-    flexDirection: 'row',
-  },
-  smartCloseBtn: {
-    flexGrow: 1,
-    flexShrink: 1,
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 10,
-    borderRadius: 4,
-  },
-  inputContent: {
-    marginTop: 8,
+  mask: {
     flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    minHeight: '72%',
+    maxHeight: '88%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 18,
+    paddingBottom: 10,
+    paddingHorizontal: 18,
+  },
+  headerBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontWeight: 600,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 26,
+  },
+  sectionTitle: {
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  card: {
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  statusCard: {
+    minHeight: 140,
+    borderRadius: 18,
+    paddingHorizontal: 22,
+    paddingVertical: 22,
+    justifyContent: 'center',
+  },
+  countdownText: {
+    fontSize: 34,
+    lineHeight: 40,
+    marginBottom: 10,
+    fontVariant: ['tabular-nums'],
+  },
+  statusTitle: {
+    marginBottom: 8,
+    fontWeight: 600,
+    paddingRight: 72,
+  },
+  smartBadge: {
+    position: 'absolute',
+    right: 22,
+    top: 22,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionRow: {
+    minHeight: 68,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+  },
+  optionText: {
+    flexGrow: 1,
+    flexShrink: 1,
+    paddingRight: 16,
+  },
+  optionDesc: {
+    marginTop: 4,
+  },
+  radio: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  customCard: {
+    marginTop: 12,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  input: {
+  customInput: {
     flexGrow: 1,
     flexShrink: 1,
-    // borderRadius: 4,
-    // paddingTop: 2,
-    // paddingBottom: 2,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 42,
+    marginRight: 10,
   },
-  inputLabel: {
-    marginLeft: 8,
+  applyBtn: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 72,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  switchCard: {
+    minHeight: 88,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  switchText: {
+    flexGrow: 1,
+    flexShrink: 1,
+    paddingRight: 16,
   },
 })
-
-

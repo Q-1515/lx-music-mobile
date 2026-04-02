@@ -222,6 +222,7 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
   const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
   const trackIndex = queue.findIndex(t => t.id == restoredTrack.id)
   if (trackIndex > -1) await TrackPlayer.skip(trackIndex)
+  global.lx.playerTrackId = restoredTrack.id
   if (position > 0) await seekToTime(position)
   if (isPlaying) await TrackPlayer.play()
   else await TrackPlayer.pause()
@@ -304,6 +305,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
   await TrackPlayer.add(tracks).then(() => list.push(...tracks))
   const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
   await TrackPlayer.skip(queue.findIndex(t => t.id == track.id))
+  global.lx.playerTrackId = track.id
 
   if (currentTrackIndex == null) {
     if (!isTempTrack(track.id as string)) {

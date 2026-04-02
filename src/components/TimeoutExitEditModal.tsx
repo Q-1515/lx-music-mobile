@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { FlatList, SafeAreaView, ScrollView, Switch, TouchableWithoutFeedback, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
+import { FlatList, Platform, SafeAreaView, ScrollView, Switch, TouchableWithoutFeedback, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 import Modal, { type ModalType } from '@/components/common/Modal'
 import Button from '@/components/common/Button'
 import Text from '@/components/common/Text'
@@ -19,6 +19,7 @@ import { useSettingValue } from '@/store/setting/hook'
 import { updateSetting } from '@/core/common'
 import { isSmartSleepCloseSupported } from '@/utils/nativeModules/smartSleepClose'
 import { useStatusbarHeight } from '@/store/common/hook'
+import { isNativeCountdownPickerSupported, openNativeCountdownPicker } from '@/utils/nativeModules/countdownPicker'
 
 const PRESET_MINUTES = [15, 30, 60, 90] as const
 const DEFAULT_CUSTOM_MINUTES = '10'
@@ -363,6 +364,22 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
     stopSmartTimeoutExit()
   }
 
+  const applyCustomMinutes = (totalMinutes: number) => {
+    if (!totalMinutes || totalMinutes > MAX_MIN) {
+      toast(t('timeout_exit_tip_max', { num: MAX_MIN }))
+      return
+    }
+    stopAllModes()
+    startTimeoutExit(totalMinutes * 60)
+    updateSetting({
+      'player.timeoutExit': String(totalMinutes),
+      'player.timeoutExitCustomMinutes': String(totalMinutes),
+      'player.timeoutExitTimerType': 'custom',
+    })
+    setCustomPickerVisible(false)
+    toast(t('timeout_exit_tip_on', { time: formatClock(totalMinutes * 60) }))
+  }
+
   const handleSelectOff = () => {
     stopAllModes()
     toast(t('timeout_exit_tip_cancel'))
@@ -388,29 +405,30 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
     toast(t('timeout_exit_tip_smart_on'))
   }
 
-  const handleOpenCustomPicker = () => {
+  const handleOpenCustomPicker = async() => {
     const sourceMinutes = storedCustomMinutes || DEFAULT_CUSTOM_MINUTES
     const parsed = parseMinutes(sourceMinutes)
+    if (Platform.OS == 'ios' && isNativeCountdownPickerSupported()) {
+      const totalMinutes = await openNativeCountdownPicker({
+        minutes: parsePositiveMinutes(sourceMinutes) || parsePositiveMinutes(DEFAULT_CUSTOM_MINUTES),
+        maxMinutes: MAX_MIN,
+        title: t('timeout_exit_custom_picker_title'),
+        confirmTitle: t('confirm'),
+        cancelTitle: t('cancel'),
+        hourTitle: t('timeout_exit_hour'),
+        minuteTitle: t('timeout_exit_min'),
+      })
+      if (totalMinutes == null) return
+      applyCustomMinutes(totalMinutes)
+      return
+    }
     setPickerHours(parsed.hours)
     setPickerMinutes(parsed.minutes)
     setCustomPickerVisible(true)
   }
 
   const handleApplyCustom = () => {
-    const totalMinutes = pickerHours * 60 + pickerMinutes
-    if (!totalMinutes || totalMinutes > MAX_MIN) {
-      toast(t('timeout_exit_tip_max', { num: MAX_MIN }))
-      return
-    }
-    stopAllModes()
-    startTimeoutExit(totalMinutes * 60)
-    updateSetting({
-      'player.timeoutExit': String(totalMinutes),
-      'player.timeoutExitCustomMinutes': String(totalMinutes),
-      'player.timeoutExitTimerType': 'custom',
-    })
-    setCustomPickerVisible(false)
-    toast(t('timeout_exit_tip_on', { time: formatClock(totalMinutes * 60) }))
+    applyCustomMinutes(pickerHours * 60 + pickerMinutes)
   }
 
   const handleToggleFinishCurrent = (value: boolean) => {
@@ -456,7 +474,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                       label={t('timeout_exit_option_custom')}
                       valueText={customValueText}
                       active={activeOption == 'custom'}
-                      onPress={handleOpenCustomPicker}
+                      onPress={() => { void handleOpenCustomPicker() }}
                     />
                     <OptionRow
                       label={t('timeout_exit_option_smart')}

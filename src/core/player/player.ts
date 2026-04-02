@@ -28,6 +28,7 @@ import { checkIgnoringBatteryOptimization, checkNotificationPermission, debounce
 import { LIST_IDS } from '@/config/constant'
 import { addListMusics, removeListMusics } from '@/core/list'
 import { addDislikeInfo } from '@/core/dislikeList'
+import { markTimeoutExitInteraction } from './timeoutExit'
 
 // import { checkMusicFileAvailable } from '@renderer/utils/music'
 
@@ -411,6 +412,7 @@ const handlePlayNext = async(playMusicInfo: LX.Player.PlayMusicInfo) => {
  * @returns
  */
 export const playNext = async(isAutoToggle = false): Promise<void> => {
+  if (!isAutoToggle) markTimeoutExitInteraction()
   if (playerState.tempPlayList.length) { // 如果稍后播放列表存在歌曲则直接播放改列表的歌曲
     const playMusicInfo = playerState.tempPlayList[0]
     removeTempPlayList(0)
@@ -510,6 +512,7 @@ export const playNext = async(isAutoToggle = false): Promise<void> => {
  * 上一曲
  */
 export const playPrev = async(isAutoToggle = false): Promise<void> => {
+  if (!isAutoToggle) markTimeoutExitInteraction()
   const playMusicInfo = playerState.playMusicInfo
   if (playMusicInfo.musicInfo == null) return handleToggleStop()
   const playInfo = playerState.playInfo
@@ -626,6 +629,7 @@ export const stop = async() => {
  * 播放、暂停播放切换
  */
 export const togglePlay = () => {
+  markTimeoutExitInteraction()
   global.lx.isPlayedStop &&= false
   if (playerState.isPlay) {
     void pause()

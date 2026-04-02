@@ -19,7 +19,7 @@ import {
   type StreamingFlacEvent,
 } from '@/utils/nativeModules/streamingFlac'
 
-type NativeFlacState = 'idle' | 'loading' | 'playing' | 'paused' | 'stopped'
+type NativeFlacState = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'stopped'
 
 type NativeFlacEvent =
   | { type: 'state', state: NativeFlacState, position?: number, duration?: number }
@@ -340,7 +340,7 @@ export const onNativeFlacPlayerEvent = (listener: (event: NativeFlacEvent) => vo
     if (currentMode != 'stream') return
     switch (event.type) {
       case 'state':
-        currentState = event.state == 'buffering' ? 'loading' : event.state
+        currentState = event.state
         listener({
           type: 'state',
           state: currentState,

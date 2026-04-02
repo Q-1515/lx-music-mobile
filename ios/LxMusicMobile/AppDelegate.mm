@@ -1136,7 +1136,7 @@ RCT_EXPORT_MODULE();
     _decoderQueue = dispatch_queue_create("cn.toside.music.mobile.streamingflac.decoder", DISPATCH_QUEUE_SERIAL);
     _renderQueue = dispatch_queue_create("cn.toside.music.mobile.streamingflac.render", DISPATCH_QUEUE_SERIAL);
     _currentState = @"idle";
-    _normalStartThresholdSeconds = 1.5;
+    _normalStartThresholdSeconds = 3.0;
     _seekStartThresholdSeconds = 0.25;
     _startThresholdSeconds = _normalStartThresholdSeconds;
     _maxBufferSeconds = 8.0;
@@ -1526,7 +1526,7 @@ RCT_EXPORT_MODULE();
             @"position": @(self.lastKnownPosition),
             @"duration": @(self.duration),
           }];
-        } else if (!self.downloadCompleted && self.playbackStarted && self.sampleRate > 0 && ((double)self.queuedFrames / self.sampleRate) < 0.15) {
+        } else if (!self.downloadCompleted && self.playbackStarted && self.sampleRate > 0 && ((double)self.queuedFrames / self.sampleRate) < 0.35) {
           [self.playerNode pause];
           self.playbackStarted = NO;
           [self emitState:@"buffering" position:@(self.lastKnownPosition) duration:@(self.duration)];

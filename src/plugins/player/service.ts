@@ -7,11 +7,14 @@ import settingState from '@/store/setting/state'
 import { isTempId, isEmpty } from './utils'
 // import { play as lrcPlay, pause as lrcPause } from '@/core/lyric'
 import { exitApp } from '@/core/common'
-import { getCurrentTrackId } from './playList'
+import { getCurrentTrackId, updateMetaData } from './playList'
 import { pause, play, playNext, playPrev } from '@/core/player/player'
+import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 import { getNativeFlacTrackId, isNativeFlacActive, onNativeFlacPlayerEvent } from './nativeFlac'
+import playerState from '@/store/player/state'
 
 let isInitialized = false
+let isNativeFlacInitialized = false
 
 // let retryTrack: LX.Player.Track | null = null
 // let retryGetUrlId: string | null = null
@@ -33,21 +36,25 @@ const registerPlaybackService = async() => {
   console.log('reg services...')
   TrackPlayer.addEventListener(TPEvent.RemotePlay, () => {
     // console.log('remote-play')
+    markTimeoutExitInteraction()
     play()
   })
 
   TrackPlayer.addEventListener(TPEvent.RemotePause, () => {
     // console.log('remote-pause')
+    markTimeoutExitInteraction()
     void pause()
   })
 
   TrackPlayer.addEventListener(TPEvent.RemoteNext, () => {
     // console.log('remote-next')
+    markTimeoutExitInteraction()
     void playNext()
   })
 
   TrackPlayer.addEventListener(TPEvent.RemotePrevious, () => {
     // console.log('remote-previous')
+    markTimeoutExitInteraction()
     void playPrev()
   })
 
@@ -77,6 +84,7 @@ const registerPlaybackService = async() => {
   })
 
   TrackPlayer.addEventListener(TPEvent.RemoteSeek, async({ position }) => {
+    markTimeoutExitInteraction()
     global.app_event.setProgress(position as number)
   })
 
@@ -225,6 +233,11 @@ const registerPlaybackService = async() => {
   //   console.log('playback-destroy')
   //   store.dispatch(playerAction.destroy())
   // })
+  isInitialized = true
+}
+
+const initNativeFlacEvents = () => {
+  if (isNativeFlacInitialized) return
   onNativeFlacPlayerEvent((event) => {
     switch (event.type) {
       case 'state':
@@ -232,10 +245,17 @@ const registerPlaybackService = async() => {
           global.app_event.playerLoadstart()
           break
         }
+        if (event.state == 'buffering') {
+          global.app_event.playerWaiting()
+          break
+        }
         if (event.state == 'playing') {
           global.lx.playerTrackId = getNativeFlacTrackId()
           global.app_event.playerPlaying()
           global.app_event.play()
+          if (playerState.musicInfo.id) {
+            void updateMetaData(playerState.musicInfo, true, playerState.lastLyric, true)
+          }
           break
         }
         if (event.state == 'paused' || event.state == 'stopped' || event.state == 'idle') {
@@ -258,11 +278,12 @@ const registerPlaybackService = async() => {
         break
     }
   })
-  isInitialized = true
+  isNativeFlacInitialized = true
 }
 
 
 export default () => {
+  initNativeFlacEvents()
   if (global.lx.playerStatus.isRegisteredService) return
   console.log('handle registerPlaybackService...')
   TrackPlayer.registerPlaybackService(() => registerPlaybackService)

@@ -184,8 +184,6 @@ const timeoutTools = {
     global.app_event.on('pause', () => { this.handlePauseLike() })
     global.app_event.on('stop', () => { this.handlePauseLike() })
     global.app_event.on('error', () => { this.handlePauseLike() })
-    global.app_event.on('musicToggled', () => { this.markInteraction() })
-    global.app_event.on('setProgress', () => { this.markInteraction() })
     this.lifecycleBound = true
   },
   addTimeHook(hook: Hook) {
@@ -239,4 +237,8 @@ export const onTimeUpdate = (handler: Hook) => {
 export const cancelTimeoutExit = () => {
   global.lx.isPlayedStop = false
   timeoutTools.callHooks()
+}
+
+export const markTimeoutExitInteraction = () => {
+  timeoutTools.markInteraction()
 }

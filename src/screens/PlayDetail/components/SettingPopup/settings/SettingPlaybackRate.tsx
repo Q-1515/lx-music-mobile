@@ -13,6 +13,7 @@ import { setPlaybackRate as setLyricPlaybackRate } from '@/core/lyric'
 import ButtonPrimary from '@/components/common/ButtonPrimary'
 import playerState from '@/store/player/state'
 import settingState from '@/store/setting/state'
+import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 
 const MIN_VALUE = 60
 const MAX_VALUE = 200
@@ -30,6 +31,7 @@ export default () => {
   const handleValueChange: SliderProps['onValueChange'] = value => {
     value = Math.trunc(value)
     setSliderSize(value)
+    markTimeoutExitInteraction()
     void setPlaybackRate(parseFloat((value / 100).toFixed(2)))
   }
   const handleSlidingComplete: SliderProps['onSlidingComplete'] = value => {
@@ -43,6 +45,7 @@ export default () => {
   }
   const handleReset = () => {
     if (settingState.setting['player.playbackRate'] == 1) return
+    markTimeoutExitInteraction()
     setSliderSize(100)
     void setPlaybackRate(1).then(() => {
       void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric, true) // 更新通知栏的播放速率

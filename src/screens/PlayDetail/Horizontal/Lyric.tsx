@@ -13,6 +13,7 @@ import { scrollTo } from '@/utils/scroll'
 import PlayLine, { type PlayLineType } from '../components/PlayLine'
 import KaraokeLine from '../components/KaraokeLine'
 import { normalizeExtendedLyricText } from '../components/lyricText'
+import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 // import { screenkeepAwake } from '@/utils/nativeModules/utils'
 // import { log } from '@/utils/log'
 // import { toast } from '@/utils/tools'
@@ -281,6 +282,7 @@ export default () => {
 
   const handlePlayLine = useCallback((time: number) => {
     playLineRef.current?.setVisible(false)
+    markTimeoutExitInteraction()
     global.app_event.setProgress(time)
   }, [])
 

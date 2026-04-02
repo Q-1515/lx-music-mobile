@@ -3,6 +3,7 @@ import { View, PanResponder } from 'react-native'
 import { useDrag } from '@/utils/hooks'
 import { createStyle } from '@/utils/tools'
 import { useTheme } from '@/store/theme/hook'
+import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 // import { scaleSizeW } from '@/utils/pixelRatio'
 // import { AppColors } from '@/theme'
 
@@ -113,6 +114,7 @@ const Progress = ({ progress, duration, buffered, paddingTop }: {
     durationRef.current = duration
   }, [duration])
   const onSetProgress = useCallback((progress: number) => {
+    markTimeoutExitInteraction()
     global.app_event.setProgress(progress * durationRef.current)
   }, [])
 

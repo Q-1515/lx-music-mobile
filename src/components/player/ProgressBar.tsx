@@ -5,6 +5,7 @@ import { useTheme } from '@/store/theme/hook'
 import { scaleSizeW, scaleSizeH } from '@/utils/pixelRatio'
 import { useDrag } from '@/utils/hooks'
 import { Icon } from '@/components/common/Icon'
+import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 // import { AppColors } from '@/theme'
 
 
@@ -88,6 +89,7 @@ const Progress = ({ progress, duration, buffered }: {
     durationRef.current = duration
   }, [duration])
   const onSetProgress = useCallback((progress: number) => {
+    markTimeoutExitInteraction()
     global.app_event.setProgress(progress * durationRef.current)
   }, [])
 

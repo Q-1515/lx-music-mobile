@@ -8,12 +8,14 @@ import { useIsPlay } from '@/store/player/hook'
 import { useLayout } from '@/utils/hooks'
 import { marginLeft } from '../constant'
 import { BTN_WIDTH } from '../MoreBtn/Btn'
+import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 
 // const WIDTH = scaleSizeW(48)
 
 const PrevBtn = ({ size }: { size: number }) => {
   const theme = useTheme()
   const handlePlayPrev = () => {
+    markTimeoutExitInteraction()
     void playPrev()
   }
   return (
@@ -25,6 +27,7 @@ const PrevBtn = ({ size }: { size: number }) => {
 const NextBtn = ({ size }: { size: number }) => {
   const theme = useTheme()
   const handlePlayNext = () => {
+    markTimeoutExitInteraction()
     void playNext()
   }
   return (
@@ -38,7 +41,10 @@ const TogglePlayBtn = ({ size }: { size: number }) => {
   const theme = useTheme()
   const isPlay = useIsPlay()
   return (
-    <TouchableOpacity style={{ ...styles.cotrolBtn, width: size, height: size }} activeOpacity={0.5} onPress={togglePlay}>
+    <TouchableOpacity style={{ ...styles.cotrolBtn, width: size, height: size }} activeOpacity={0.5} onPress={() => {
+      markTimeoutExitInteraction()
+      togglePlay()
+    }}>
       <Icon name={isPlay ? 'pause' : 'play'} color={theme['c-button-font']} rawSize={size * 0.7} />
     </TouchableOpacity>
   )

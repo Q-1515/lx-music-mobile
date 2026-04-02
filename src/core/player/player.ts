@@ -143,7 +143,9 @@ export const setMusicUrl = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   if (!diffCurrentMusicInfo(musicInfo)) return
   if (cancelDelayRetry) cancelDelayRetry()
   global.lx.gettingUrlId = createGettingUrlId(musicInfo)
-  const currentTimePromise = getPosition().catch(() => playerState.progress.nowPlayTime)
+  const currentTimePromise = isRefresh
+    ? getPosition().catch(() => playerState.progress.nowPlayTime)
+    : Promise.resolve(playerState.progress.nowPlayTime)
   void getMusicPlayUrl(musicInfo, isRefresh).then(async(result) => {
     if (!result) return
     const currentTime = await currentTimePromise

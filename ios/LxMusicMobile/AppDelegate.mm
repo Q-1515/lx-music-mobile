@@ -2114,7 +2114,8 @@ static void LXStreamingFlacErrorCallback(const FLAC__StreamDecoder *decoder, FLA
 @property (nonatomic, assign) BOOL hasListeners;
 @property (nonatomic, assign) BOOL monitoringEnabled;
 @property (nonatomic, assign) BOOL motionSamplingActive;
-@property (nonatomic, assign) NSTimeInterval lastUserInteractionAt;
+@property (nonatomic, assign) NSTimeInterval monitorStartedAt;
+@property (nonatomic, assign) NSTimeInterval nextEvaluationAt;
 @property (nonatomic, assign) double inactivityThresholdSeconds;
 @property (nonatomic, assign) double motionWindowSeconds;
 @property (nonatomic, assign) double prewarmSeconds;
@@ -2167,7 +2168,7 @@ RCT_EXPORT_MODULE();
 }
 
 - (NSTimeInterval)currentInactiveSecondsLocked {
-  return MAX([self currentTimestamp] - self.lastUserInteractionAt, 0);
+  return MAX([self currentTimestamp] - self.monitorStartedAt, 0);
 }
 
 - (void)emitEventWithType:(NSString *)type body:(NSDictionary *)body {
@@ -2303,8 +2304,9 @@ RCT_EXPORT_MODULE();
 - (void)handleCheckLocked {
   if (!self.monitoringEnabled) return;
 
-  NSTimeInterval inactiveSeconds = [self currentInactiveSecondsLocked];
-  if (inactiveSeconds >= self.prewarmSeconds) {
+  NSTimeInterval now = [self currentTimestamp];
+  NSTimeInterval elapsedSeconds = [self currentInactiveSecondsLocked];
+  if (elapsedSeconds >= self.prewarmSeconds) {
     if (!self.motionSamplingActive) {
       [self startMotionSamplingLocked];
       [self emitStateLocked:@"collecting_motion"];
@@ -2320,8 +2322,14 @@ RCT_EXPORT_MODULE();
     return;
   }
 
-  if (inactiveSeconds < self.inactivityThresholdSeconds) return;
-  if (![self isMotionStableLocked]) return;
+  if (now < self.nextEvaluationAt) return;
+  if (![self isMotionStableLocked]) {
+    NSTimeInterval retryInterval = MAX(self.motionWindowSeconds, 30);
+    do {
+      self.nextEvaluationAt += retryInterval;
+    } while (self.nextEvaluationAt <= now);
+    return;
+  }
   [self handleTriggeredLocked];
 }
 
@@ -2355,7 +2363,8 @@ RCT_REMAP_METHOD(startMonitoring, startMonitoring:(NSDictionary *)options resolv
 
     [self stopMonitoringInternalLockedResetState:NO];
     self.monitoringEnabled = YES;
-    self.lastUserInteractionAt = [self currentTimestamp];
+    self.monitorStartedAt = [self currentTimestamp];
+    self.nextEvaluationAt = self.monitorStartedAt + self.inactivityThresholdSeconds;
     self.monitorState = @"waiting_inactive";
     [self clearMotionSamplesLocked];
     [self startCheckTimerLocked];
@@ -2379,19 +2388,6 @@ RCT_REMAP_METHOD(stopMonitoring, stopMonitoringWithResolver:(RCTPromiseResolveBl
 
 RCT_REMAP_METHOD(markUserInteraction, markUserInteractionWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(self.monitorQueue, ^{
-    if (!self.monitoringEnabled) {
-      dispatch_async(dispatch_get_main_queue(), ^{
-        resolve(nil);
-      });
-      return;
-    }
-
-    self.lastUserInteractionAt = [self currentTimestamp];
-    if (self.motionSamplingActive) {
-      [self stopMotionSamplingLocked];
-      [self clearMotionSamplesLocked];
-    }
-    [self emitStateLocked:@"waiting_inactive"];
     dispatch_async(dispatch_get_main_queue(), ^{
       resolve(nil);
     });

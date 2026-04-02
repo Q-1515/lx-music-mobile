@@ -7,7 +7,6 @@ import playerState from '@/store/player/state'
 import settingState from '@/store/setting/state'
 import {
   isSmartSleepCloseSupported,
-  markSmartSleepCloseInteraction,
   onSmartSleepCloseEvent,
   startSmartSleepCloseMonitoring,
   stopSmartSleepCloseMonitoring,
@@ -119,11 +118,7 @@ const timeoutTools = {
     this.smartState = 'waiting_inactive'
     this.bindSmartEvents()
     this.bindLifecycleEvents()
-    if (playerState.isPlay) {
-      void this.startSmartNative().then(() => {
-        void markSmartSleepCloseInteraction().catch(() => {})
-      })
-    }
+    void this.startSmartNative()
     this.callHooks()
   },
   stopSmart(resetMode = true) {
@@ -133,25 +128,13 @@ const timeoutTools = {
     this.callHooks()
   },
   markInteraction() {
-    if (this.mode != 'smart') return
-    this.smartState = 'waiting_inactive'
-    this.callHooks()
-    if (!playerState.isPlay) return
-    void markSmartSleepCloseInteraction().catch(() => {})
+    // Smart close now follows a fixed sensor schedule and ignores user interaction resets.
   },
   handlePlay() {
-    if (this.mode != 'smart') return
-    this.smartState = 'waiting_inactive'
-    this.callHooks()
-    void this.startSmartNative().then(() => {
-      void markSmartSleepCloseInteraction().catch(() => {})
-    })
+    // Player lifecycle changes no longer restart smart close timing.
   },
   handlePauseLike() {
-    if (this.mode != 'smart') return
-    void this.stopSmartNative()
-    this.smartState = 'waiting_inactive'
-    this.callHooks()
+    // Sensor monitoring remains timer-driven instead of playback-driven.
   },
   bindSmartEvents() {
     if (this.smartEventSubscribed || Platform.OS != 'ios' || !isSmartSleepCloseSupported()) return

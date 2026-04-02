@@ -62,6 +62,8 @@ const parseMinutes = (minutesText: string) => {
   }
 }
 
+// TODO: remove after old custom label helper is fully deleted from follow-up cleanup.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const formatCustomLabel = (hours: number, minutes: number) => {
   return `${hours.toString().padStart(2, '0')} 小时 ${minutes.toString().padStart(2, '0')} 分钟`
 }
@@ -388,13 +390,13 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   const customValueText = useMemo(() => {
     if (!customMinutes) return t('timeout_exit_option_custom_placeholder')
     const { hours, minutes } = parseMinutes(customMinutes)
-    return formatCustomLabel(hours, minutes)
+    return `${hours.toString().padStart(2, '0')} ${t('timeout_exit_hour')} ${minutes.toString().padStart(2, '0')} ${t('timeout_exit_min')}`
   }, [customMinutes, t])
 
   return (
     visible
       ? (
-          <Modal ref={modalRef} onHide={() => { setVisible(false) }} bgColor="rgba(35, 35, 35, .32)">
+          <Modal ref={modalRef} onHide={() => { setVisible(false) }} bgColor={theme['c-main-background']}>
             <View style={styles.mask}>
               <View style={{ ...styles.sheet, backgroundColor: theme['c-main-background'] }}>
                 <View style={styles.header}>
@@ -444,9 +446,9 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                     <Switch
                       value={timeoutExitPlayed}
                       onValueChange={handleToggleFinishCurrent}
-                      trackColor={{ false: theme['c-primary-light-400-alpha-300'], true: theme['c-primary-alpha-800'] }}
-                      thumbColor={theme['c-button-font']}
-                      ios_backgroundColor={theme['c-primary-light-400-alpha-300']}
+                      trackColor={{ false: '#E7EAF0', true: theme['c-primary'] }}
+                      thumbColor="#FFFFFF"
+                      ios_backgroundColor="#E7EAF0"
                     />
                   </View>
                 </ScrollView>
@@ -471,14 +473,9 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
 const styles = createStyle({
   mask: {
     flex: 1,
-    justifyContent: 'flex-end',
   },
   sheet: {
-    minHeight: '72%',
-    maxHeight: '88%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: 'hidden',
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
@@ -502,7 +499,7 @@ const styles = createStyle({
   },
   scrollContent: {
     paddingHorizontal: 18,
-    paddingBottom: 34,
+    paddingBottom: 42,
   },
   sectionTitle: {
     marginTop: 14,
@@ -599,18 +596,21 @@ const styles = createStyle({
     top: 0,
     bottom: 0,
     justifyContent: 'flex-end',
+    zIndex: 20,
+    elevation: 20,
   },
   pickerBackdrop: {
     flex: 1,
+    backgroundColor: 'rgba(35, 35, 35, .24)',
   },
   pickerPanel: {
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     paddingTop: 18,
-    paddingBottom: 24,
+    paddingBottom: 28,
     paddingHorizontal: 18,
-    marginHorizontal: 8,
-    marginBottom: 8,
   },
   pickerHeader: {
     flexDirection: 'row',
@@ -635,6 +635,7 @@ const styles = createStyle({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+    paddingHorizontal: 10,
   },
   wheelOverlay: {
     position: 'absolute',
@@ -652,10 +653,11 @@ const styles = createStyle({
   wheelColumnWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 8,
+    justifyContent: 'center',
+    flex: 1,
   },
   wheelList: {
-    width: 88,
+    width: 84,
     height: WHEEL_HEIGHT,
   },
   wheelContent: {
@@ -667,7 +669,7 @@ const styles = createStyle({
     justifyContent: 'center',
   },
   wheelLabel: {
-    width: 58,
+    width: 54,
     textAlign: 'center',
   },
 })

@@ -20,6 +20,23 @@ import { getPosition } from '@/plugins/player/utils'
 import playerState from '@/store/player/state'
 // import settingState from '@/store/setting/state'
 
+const getReliableLyricPosition = async() => {
+  const progressPosition = Math.max(playerState.progress.nowPlayTime, 0)
+  const playerPosition = await getPosition().catch(() => progressPosition)
+
+  // Right after switching songs, progress belongs to the new song and is reset
+  // immediately, while native/player position may still transiently report the
+  // previous song. In that window, always trust the new track progress.
+  if (progressPosition <= 1) {
+    if (playerPosition > 5) return progressPosition
+    return Math.max(progressPosition, 0)
+  }
+  if (playerPosition <= 0) return progressPosition
+
+  if (Math.abs(playerPosition - progressPosition) > 2) return progressPosition
+  return playerPosition
+}
+
 /**
  * init lyric
  */
@@ -72,7 +89,7 @@ export const setPlaybackRate = async(playbackRate: number) => {
   await setDesktopLyricPlaybackRate(playbackRate)
   if (playerState.isPlay) {
     setTimeout(() => {
-      void getPosition().then((position) => {
+      void getReliableLyricPosition().then((position) => {
         handlePlay(position * 1000)
       })
     })
@@ -100,7 +117,7 @@ export const toggleRoma = async(isShowLyricRoma: boolean) => {
 }
 
 export const play = () => {
-  void getPosition().then((position) => {
+  void getReliableLyricPosition().then((position) => {
     handlePlay(position * 1000)
   })
 }
@@ -120,7 +137,7 @@ export const seek = (time: number) => {
 
 export const setLyric = async() => {
   if (!playerState.musicInfo.id) return
-  const lyric = playerState.musicInfo.lxlrc || playerState.musicInfo.lrc
+  const lyric = playerState.musicInfo.lxlrc ?? playerState.musicInfo.lrc
   if (lyric) {
     let tlrc = ''
     let rlrc = ''

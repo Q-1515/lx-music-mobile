@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Lyric, { type Lines } from 'lrc-file-parser'
 import LxLyricPlayer, { type LxLyricLine } from './lxLyricPlayer'
 // import { getStore, subscribe } from '@/store'
-export type Line = (Lines[number] & { rawText?: string, words?: { startTime: number, duration: number, text: string }[] }) | LxLyricLine
+export type Line = (Lines[number] & { rawText?: string, words?: Array<{ startTime: number, duration: number, text: string }> }) | LxLyricLine
 type PlayerLines = Line[]
 type PlayHook = (line: number, text: string, wordIndex: number, wordProgress: number) => void
 type SetLyricHook = (lines: PlayerLines) => void
@@ -69,7 +69,12 @@ const lrcTools = {
   removeSetLyricHook(hook: SetLyricHook) {
     this.setLyricHooks.splice(this.setLyricHooks.indexOf(hook), 1)
   },
+  stopPlayers() {
+    this.lrc?.pause()
+    this.lxLrc?.pause()
+  },
   setLyric() {
+    this.stopPlayers()
     const extendedLyrics = [] as string[]
     if (this.isShowTranslation && this.translationText) extendedLyrics.push(this.translationText)
     if (this.isShowRoma && this.romaText) extendedLyrics.push(this.romaText)
@@ -114,8 +119,7 @@ export const play = (time: number) => {
 export const pause = () => {
   // console.log('pause')
   lrcTools.isPlay = false
-  if (lrcTools.useLxPlayer) lrcTools.lxLrc!.pause()
-  else lrcTools.lrc!.pause()
+  lrcTools.stopPlayers()
 }
 
 export const onLyricPlay = (hook: PlayHook) => {

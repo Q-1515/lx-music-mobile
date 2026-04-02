@@ -1,8 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { ScrollView, Switch, View } from 'react-native'
+import { FlatList, ScrollView, Switch, TouchableWithoutFeedback, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 import Modal, { type ModalType } from '@/components/common/Modal'
 import Button from '@/components/common/Button'
-import Input, { type InputType } from '@/components/common/Input'
 import Text from '@/components/common/Text'
 import { Icon } from '@/components/common/Icon'
 import { createStyle, toast } from '@/utils/tools'
@@ -23,9 +22,31 @@ import { isSmartSleepCloseSupported } from '@/utils/nativeModules/smartSleepClos
 
 const PRESET_MINUTES = [15, 30, 60, 90] as const
 const MAX_MIN = 1440
-const timeInputRxp = /([1-9]\d*)/
+const WHEEL_ITEM_HEIGHT = 54
+const WHEEL_VISIBLE_ROWS = 5
+const WHEEL_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS
 
-const formatTime = (time: number) => {
+type TimeoutOption = 'off' | 'smart' | number | 'custom'
+
+const HOURS = Array.from({ length: 25 }, (_, index) => index)
+const MINUTES = Array.from({ length: 60 }, (_, index) => index)
+
+const cardShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 14 },
+  shadowOpacity: 0.1,
+  shadowRadius: 24,
+  elevation: 6,
+} as const
+
+const getCardSurfaceStyle = (theme: ReturnType<typeof useTheme>) => ({
+  ...cardShadow,
+  backgroundColor: theme['c-content-background'],
+  borderWidth: 1,
+  borderColor: theme['c-border-background'],
+}) as const
+
+const formatClock = (time: number) => {
   const safeTime = Math.max(time, 0)
   const h = Math.trunc(safeTime / 3600)
   const m = Math.trunc((safeTime % 3600) / 60).toString().padStart(2, '0')
@@ -33,7 +54,17 @@ const formatTime = (time: number) => {
   return `${h.toString().padStart(2, '0')}:${m}:${s}`
 }
 
-type TimeoutOption = 'off' | 'smart' | number | 'custom'
+const parseMinutes = (minutesText: string) => {
+  const minutes = Math.max(parseInt(minutesText || '0') || 0, 0)
+  return {
+    hours: Math.min(Math.trunc(minutes / 60), 24),
+    minutes: Math.min(minutes % 60, 59),
+  }
+}
+
+const formatCustomLabel = (hours: number, minutes: number) => {
+  return `${hours.toString().padStart(2, '0')} 小时 ${minutes.toString().padStart(2, '0')} 分钟`
+}
 
 const resolveActiveOption = (timeInfo: ReturnType<typeof useTimeInfo>, customMinutes: string): TimeoutOption => {
   if (timeInfo.mode == 'smart') return 'smart'
@@ -63,23 +94,17 @@ const SectionTitle = ({ title }: { title: string }) => {
   return <Text style={styles.sectionTitle} color={theme['c-font-label']}>{title}</Text>
 }
 
-const cardShadow = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 10 },
-  shadowOpacity: 0.08,
-  shadowRadius: 20,
-  elevation: 4,
-} as const
-
 const OptionRow = ({
   label,
   desc,
+  valueText,
   active,
   onPress,
   borderless = false,
 }: {
   label: string
   desc?: string
+  valueText?: string
   active: boolean
   onPress: () => void
   borderless?: boolean
@@ -97,7 +122,10 @@ const OptionRow = ({
         <Text size={16}>{label}</Text>
         {desc ? <Text style={styles.optionDesc} size={13} color={theme['c-font-label']}>{desc}</Text> : null}
       </View>
-      <Radio active={active} />
+      <View style={styles.optionTrailing}>
+        {valueText ? <Text style={styles.optionValue} size={14} color={theme['c-font-label']}>{valueText}</Text> : null}
+        <Radio active={active} />
+      </View>
     </Button>
   )
 }
@@ -105,6 +133,7 @@ const OptionRow = ({
 const StatusCard = ({ timeInfo }: { timeInfo: ReturnType<typeof useTimeInfo> }) => {
   const theme = useTheme()
   const t = useI18n()
+  const cardStyle = useMemo(() => ({ ...styles.statusCard, ...getCardSurfaceStyle(theme) }), [theme])
 
   const statusLabel = timeInfo.isPlayedStop
     ? t('timeout_exit_btn_wait_tip')
@@ -115,7 +144,7 @@ const StatusCard = ({ timeInfo }: { timeInfo: ReturnType<typeof useTimeInfo> }) 
         : t('timeout_exit_status_off')
 
   return (
-    <View style={{ ...styles.statusCard, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+    <View style={cardStyle}>
       {
         timeInfo.mode == 'smart'
           ? (
@@ -129,11 +158,124 @@ const StatusCard = ({ timeInfo }: { timeInfo: ReturnType<typeof useTimeInfo> }) 
             )
           : (
               <>
-                <Text style={styles.countdownText} color={theme['c-font-label']}>{formatTime(timeInfo.time > -1 ? timeInfo.time : 0)}</Text>
+                <Text style={styles.countdownText}>{formatClock(timeInfo.time > -1 ? timeInfo.time : 0)}</Text>
                 <Text size={16} color={theme['c-font-label']}>{statusLabel}</Text>
               </>
             )
       }
+    </View>
+  )
+}
+
+const WheelColumn = ({
+  list,
+  selected,
+  onSelect,
+}: {
+  list: number[]
+  selected: number
+  onSelect: (value: number) => void
+}) => {
+  const theme = useTheme()
+  const flatListRef = useRef<FlatList<number>>(null)
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToOffset({
+        offset: selected * WHEEL_ITEM_HEIGHT,
+        animated: false,
+      })
+    })
+  }, [selected])
+
+  const updateSelectedFromOffset = (offsetY: number) => {
+    const rawIndex = Math.round(offsetY / WHEEL_ITEM_HEIGHT)
+    const index = Math.min(Math.max(rawIndex, 0), list.length - 1)
+    onSelect(list[index])
+  }
+
+  const handleMomentumScrollEnd = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    updateSelectedFromOffset(nativeEvent.contentOffset.y)
+  }
+
+  const handleScrollEndDrag = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    updateSelectedFromOffset(nativeEvent.contentOffset.y)
+  }
+
+  const renderItem = ({ item }: { item: number }) => {
+    const active = item == selected
+    return (
+      <View style={styles.wheelItem}>
+        <Text size={active ? 20 : 17} color={active ? theme['c-font'] : theme['c-font-label']}>{item.toString().padStart(2, '0')}</Text>
+      </View>
+    )
+  }
+
+  return (
+    <FlatList
+      ref={flatListRef}
+      data={list}
+      renderItem={renderItem}
+      keyExtractor={(item) => String(item)}
+      showsVerticalScrollIndicator={false}
+      snapToInterval={WHEEL_ITEM_HEIGHT}
+      decelerationRate="fast"
+      getItemLayout={(_, index) => ({ length: WHEEL_ITEM_HEIGHT, offset: WHEEL_ITEM_HEIGHT * index, index })}
+      contentContainerStyle={styles.wheelContent}
+      style={styles.wheelList}
+      onMomentumScrollEnd={handleMomentumScrollEnd}
+      onScrollEndDrag={handleScrollEndDrag}
+    />
+  )
+}
+
+const CustomTimePicker = ({
+  visible,
+  hours,
+  minutes,
+  onClose,
+  onConfirm,
+  onChangeHours,
+  onChangeMinutes,
+}: {
+  visible: boolean
+  hours: number
+  minutes: number
+  onClose: () => void
+  onConfirm: () => void
+  onChangeHours: (value: number) => void
+  onChangeMinutes: (value: number) => void
+}) => {
+  const theme = useTheme()
+  const t = useI18n()
+  if (!visible) return null
+
+  return (
+    <View style={styles.pickerMask} pointerEvents="box-none">
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={styles.pickerBackdrop} />
+      </TouchableWithoutFeedback>
+      <View style={{ ...styles.pickerPanel, ...getCardSurfaceStyle(theme) }}>
+        <View style={styles.pickerHeader}>
+          <Text style={styles.pickerTitle} size={17}>{t('timeout_exit_custom_picker_title')}</Text>
+          <Button style={{ ...styles.pickerConfirmBtn, backgroundColor: theme['c-primary'] }} onPress={onConfirm}>
+            <Text color={theme['c-button-font']} size={15}>{t('confirm')}</Text>
+          </Button>
+        </View>
+        <View style={styles.pickerBody}>
+          <View style={styles.wheelOverlay}>
+            <View style={{ ...styles.wheelOverlayHighlight, backgroundColor: theme['c-primary-input-background'] }} />
+          </View>
+          <View style={styles.wheelColumnWrap}>
+            <WheelColumn list={HOURS} selected={hours} onSelect={onChangeHours} />
+            <Text style={styles.wheelLabel} size={18}>{t('timeout_exit_hour')}</Text>
+          </View>
+          <View style={styles.wheelColumnWrap}>
+            <WheelColumn list={MINUTES} selected={minutes} onSelect={onChangeMinutes} />
+            <Text style={styles.wheelLabel} size={18}>{t('timeout_exit_min')}</Text>
+          </View>
+        </View>
+      </View>
     </View>
   )
 }
@@ -152,14 +294,21 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   const theme = useTheme()
   const t = useI18n()
   const modalRef = useRef<ModalType>(null)
-  const customInputRef = useRef<InputType>(null)
   const [visible, setVisible] = useState(false)
+  const [customPickerVisible, setCustomPickerVisible] = useState(false)
   const [customMinutes, setCustomMinutes] = useState(settingState.setting['player.timeoutExit'] || '')
+  const [pickerHours, setPickerHours] = useState(0)
+  const [pickerMinutes, setPickerMinutes] = useState(10)
   const timeoutExitPlayed = useSettingValue('player.timeoutExitPlayed')
+  const cardSurfaceStyle = useMemo(() => getCardSurfaceStyle(theme), [theme])
 
   useEffect(() => {
     if (!visible) return
-    setCustomMinutes(settingState.setting['player.timeoutExit'] || '')
+    const nextCustomMinutes = settingState.setting['player.timeoutExit'] || ''
+    setCustomMinutes(nextCustomMinutes)
+    const { hours, minutes } = parseMinutes(nextCustomMinutes)
+    setPickerHours(hours)
+    setPickerMinutes(minutes)
   }, [visible])
 
   useImperativeHandle(ref, () => ({
@@ -172,6 +321,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   }))
 
   const hide = () => {
+    setCustomPickerVisible(false)
     modalRef.current?.setVisible(false)
   }
 
@@ -193,7 +343,10 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
     startTimeoutExit(minutes * 60)
     updateSetting({ 'player.timeoutExit': String(minutes) })
     setCustomMinutes(String(minutes))
-    toast(t('timeout_exit_tip_on', { time: formatTime(minutes * 60) }))
+    const parsed = parseMinutes(String(minutes))
+    setPickerHours(parsed.hours)
+    setPickerMinutes(parsed.minutes)
+    toast(t('timeout_exit_tip_on', { time: formatClock(minutes * 60) }))
   }
 
   const handleSelectSmart = () => {
@@ -206,28 +359,37 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
     toast(t('timeout_exit_tip_smart_on'))
   }
 
+  const handleOpenCustomPicker = () => {
+    const sourceMinutes = activeOption == 'custom' && customMinutes ? customMinutes : (settingState.setting['player.timeoutExit'] || customMinutes)
+    const parsed = parseMinutes(sourceMinutes)
+    setPickerHours(parsed.hours)
+    setPickerMinutes(parsed.minutes)
+    setCustomPickerVisible(true)
+  }
+
   const handleApplyCustom = () => {
-    let timeStr = customMinutes.trim()
-    if (!timeInputRxp.test(timeStr)) {
-      if (timeStr.length) toast(t('input_error'))
-      return
-    }
-    timeStr = RegExp.$1
-    const minutes = parseInt(timeStr)
-    if (minutes > MAX_MIN) {
+    const totalMinutes = pickerHours * 60 + pickerMinutes
+    if (!totalMinutes || totalMinutes > MAX_MIN) {
       toast(t('timeout_exit_tip_max', { num: MAX_MIN }))
       return
     }
     stopAllModes()
-    startTimeoutExit(minutes * 60)
-    updateSetting({ 'player.timeoutExit': String(minutes) })
-    setCustomMinutes(String(minutes))
-    toast(t('timeout_exit_tip_on', { time: formatTime(minutes * 60) }))
+    startTimeoutExit(totalMinutes * 60)
+    updateSetting({ 'player.timeoutExit': String(totalMinutes) })
+    setCustomMinutes(String(totalMinutes))
+    setCustomPickerVisible(false)
+    toast(t('timeout_exit_tip_on', { time: formatClock(totalMinutes * 60) }))
   }
 
   const handleToggleFinishCurrent = (value: boolean) => {
     updateSetting({ 'player.timeoutExitPlayed': value })
   }
+
+  const customValueText = useMemo(() => {
+    if (!customMinutes) return t('timeout_exit_option_custom_placeholder')
+    const { hours, minutes } = parseMinutes(customMinutes)
+    return formatCustomLabel(hours, minutes)
+  }, [customMinutes, t])
 
   return (
     visible
@@ -248,7 +410,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                   <StatusCard timeInfo={timeInfo} />
 
                   <SectionTitle title={t('timeout_exit_section_select')} />
-                  <View style={{ ...styles.card, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+                  <View style={{ ...styles.card, ...cardSurfaceStyle }}>
                     <OptionRow label={t('timeout_exit_option_off')} active={activeOption == 'off'} onPress={handleSelectOff} />
                     {PRESET_MINUTES.map((minutes) => (
                       <OptionRow
@@ -258,24 +420,12 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                         onPress={() => { handleSelectPreset(minutes) }}
                       />
                     ))}
-                    <OptionRow label={t('timeout_exit_option_custom')} active={activeOption == 'custom'} onPress={() => { customInputRef.current?.focus() }} borderless />
-                  </View>
-
-                  <View style={{ ...styles.card, ...styles.customCard, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
-                    <Input
-                      ref={customInputRef}
-                      value={customMinutes}
-                      onChangeText={setCustomMinutes}
-                      keyboardType="number-pad"
-                      placeholder={t('timeout_exit_input_tip')}
-                      style={{ ...styles.customInput, backgroundColor: theme['c-primary-input-background'] }}
+                    <OptionRow
+                      label={t('timeout_exit_option_custom')}
+                      valueText={customValueText}
+                      active={activeOption == 'custom'}
+                      onPress={handleOpenCustomPicker}
                     />
-                    <Button style={{ ...styles.applyBtn, backgroundColor: theme['c-button-background'] }} onPress={handleApplyCustom}>
-                      <Text color={theme['c-button-font']}>{t('confirm')}</Text>
-                    </Button>
-                  </View>
-
-                  <View style={{ ...styles.card, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
                     <OptionRow
                       label={t('timeout_exit_option_smart')}
                       desc={t('timeout_exit_option_smart_desc')}
@@ -286,7 +436,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                   </View>
 
                   <SectionTitle title={t('timeout_exit_section_other')} />
-                  <View style={{ ...styles.card, ...styles.switchCard, ...cardShadow, backgroundColor: theme['c-content-background'] }}>
+                  <View style={{ ...styles.card, ...styles.switchCard, ...cardSurfaceStyle }}>
                     <View style={styles.switchText}>
                       <Text size={16}>{t('timeout_exit_label_isPlayed')}</Text>
                       <Text style={styles.optionDesc} size={13} color={theme['c-font-label']}>{t('timeout_exit_label_isPlayed_desc')}</Text>
@@ -301,6 +451,16 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
                   </View>
                 </ScrollView>
               </View>
+
+              <CustomTimePicker
+                visible={customPickerVisible}
+                hours={pickerHours}
+                minutes={pickerMinutes}
+                onClose={() => { setCustomPickerVisible(false) }}
+                onConfirm={handleApplyCustom}
+                onChangeHours={setPickerHours}
+                onChangeMinutes={setPickerMinutes}
+              />
             </View>
           </Modal>
         )
@@ -342,19 +502,20 @@ const styles = createStyle({
   },
   scrollContent: {
     paddingHorizontal: 18,
-    paddingBottom: 26,
+    paddingBottom: 34,
   },
   sectionTitle: {
-    marginTop: 12,
-    marginBottom: 10,
+    marginTop: 14,
+    marginBottom: 12,
+    paddingLeft: 4,
   },
   card: {
-    borderRadius: 18,
+    borderRadius: 22,
     overflow: 'hidden',
   },
   statusCard: {
     minHeight: 140,
-    borderRadius: 18,
+    borderRadius: 22,
     paddingHorizontal: 22,
     paddingVertical: 22,
     justifyContent: 'center',
@@ -363,6 +524,7 @@ const styles = createStyle({
     fontSize: 34,
     lineHeight: 40,
     marginBottom: 10,
+    fontWeight: 600,
     fontVariant: ['tabular-nums'],
   },
   statusTitle: {
@@ -394,6 +556,13 @@ const styles = createStyle({
     flexShrink: 1,
     paddingRight: 16,
   },
+  optionTrailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  optionValue: {
+    marginRight: 12,
+  },
   optionDesc: {
     marginTop: 4,
   },
@@ -410,30 +579,6 @@ const styles = createStyle({
     height: 10,
     borderRadius: 5,
   },
-  customCard: {
-    marginTop: 12,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  customInput: {
-    flexGrow: 1,
-    flexShrink: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 42,
-    marginRight: 10,
-  },
-  applyBtn: {
-    flexGrow: 0,
-    flexShrink: 0,
-    minWidth: 72,
-    height: 42,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
   switchCard: {
     minHeight: 88,
     paddingHorizontal: 20,
@@ -446,5 +591,83 @@ const styles = createStyle({
     flexGrow: 1,
     flexShrink: 1,
     paddingRight: 16,
+  },
+  pickerMask: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'flex-end',
+  },
+  pickerBackdrop: {
+    flex: 1,
+  },
+  pickerPanel: {
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingTop: 18,
+    paddingBottom: 24,
+    paddingHorizontal: 18,
+    marginHorizontal: 8,
+    marginBottom: 8,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  pickerTitle: {
+    fontWeight: 600,
+  },
+  pickerConfirmBtn: {
+    minWidth: 80,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  pickerBody: {
+    height: WHEEL_HEIGHT + 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  wheelOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 8 + WHEEL_ITEM_HEIGHT * 2,
+    height: WHEEL_ITEM_HEIGHT,
+    alignItems: 'center',
+  },
+  wheelOverlayHighlight: {
+    width: '82%',
+    height: WHEEL_ITEM_HEIGHT,
+    borderRadius: 16,
+  },
+  wheelColumnWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 8,
+  },
+  wheelList: {
+    width: 88,
+    height: WHEEL_HEIGHT,
+  },
+  wheelContent: {
+    paddingVertical: WHEEL_ITEM_HEIGHT * 2,
+  },
+  wheelItem: {
+    height: WHEEL_ITEM_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wheelLabel: {
+    width: 58,
+    textAlign: 'center',
   },
 })

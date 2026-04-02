@@ -9,6 +9,7 @@ interface NativeCountdownPickerModule {
     cancelTitle?: string
     hourTitle?: string
     minuteTitle?: string
+    confirmButtonColor?: string
   }) => Promise<number | null>
 }
 
@@ -24,6 +25,7 @@ export const openNativeCountdownPicker = async(options: {
   cancelTitle?: string
   hourTitle?: string
   minuteTitle?: string
+  confirmButtonColor?: string
 } = {}) => {
   if (!isNativeCountdownPickerSupported()) throw new Error('CountdownPickerModule.open is not supported')
   return CountdownPickerModule!.open!(options)

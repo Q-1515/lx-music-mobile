@@ -417,6 +417,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
         cancelTitle: t('cancel'),
         hourTitle: t('timeout_exit_hour'),
         minuteTitle: t('timeout_exit_min'),
+        confirmButtonColor: theme['c-primary'],
       })
       if (totalMinutes == null) return
       applyCustomMinutes(totalMinutes)

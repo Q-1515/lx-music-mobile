@@ -182,6 +182,56 @@ static double LXClampDouble(double value, double minValue, double maxValue) {
   return value;
 }
 
+static UIColor *LXColorFromString(NSString *value, UIColor *fallback) {
+  if (![value isKindOfClass:[NSString class]] || value.length == 0) return fallback;
+  NSString *text = [[value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+
+  if ([text hasPrefix:@"#"]) {
+    NSString *hex = [text substringFromIndex:1];
+    unsigned long long hexValue = 0;
+    if (![[NSScanner scannerWithString:hex] scanHexLongLong:&hexValue]) return fallback;
+
+    if (hex.length == 6) {
+      return [UIColor colorWithRed:((hexValue >> 16) & 0xFF) / 255.0
+                             green:((hexValue >> 8) & 0xFF) / 255.0
+                              blue:(hexValue & 0xFF) / 255.0
+                             alpha:1];
+    }
+    if (hex.length == 8) {
+      return [UIColor colorWithRed:((hexValue >> 24) & 0xFF) / 255.0
+                             green:((hexValue >> 16) & 0xFF) / 255.0
+                              blue:((hexValue >> 8) & 0xFF) / 255.0
+                             alpha:(hexValue & 0xFF) / 255.0];
+    }
+    return fallback;
+  }
+
+  NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"rgba?\\s*\\(([^\\)]+)\\)" options:0 error:nil];
+  NSTextCheckingResult *match = [regex firstMatchInString:text options:0 range:NSMakeRange(0, text.length)];
+  if (match == nil || match.numberOfRanges < 2) return fallback;
+
+  NSString *params = [text substringWithRange:[match rangeAtIndex:1]];
+  NSArray<NSString *> *parts = [params componentsSeparatedByString:@","];
+  if (parts.count < 3) return fallback;
+
+  CGFloat rgba[4] = { 0, 0, 0, 1 };
+  for (NSInteger i = 0; i < MIN(parts.count, 4); i++) {
+    NSString *component = [parts[i] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    rgba[i] = i == 3 ? MAX(MIN(component.doubleValue, 1), 0) : MAX(MIN(component.doubleValue / 255.0, 1), 0);
+  }
+  return [UIColor colorWithRed:rgba[0] green:rgba[1] blue:rgba[2] alpha:rgba[3]];
+}
+
+static BOOL LXColorNeedsDarkText(UIColor *color) {
+  CGFloat red = 0;
+  CGFloat green = 0;
+  CGFloat blue = 0;
+  CGFloat alpha = 0;
+  if (![color getRed:&red green:&green blue:&blue alpha:&alpha]) return YES;
+  CGFloat luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return luminance > 0.62;
+}
+
 static SecKeyRef LXCreateRSAKey(NSData *data, CFTypeRef keyClass, NSError **error) {
   NSData *normalizedData = CFEqual(keyClass, kSecAttrKeyClassPublic)
     ? LXStripPublicKeyHeader(data)
@@ -2419,6 +2469,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, copy) NSString *confirmTitle;
 @property (nonatomic, copy) NSString *hourTitle;
 @property (nonatomic, copy) NSString *minuteTitle;
+@property (nonatomic, strong) UIColor *confirmButtonColor;
 @property (nonatomic, strong) UIView *headerView;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UIButton *confirmButton;
@@ -2435,7 +2486,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 @implementation LXModernCountdownPickerViewController
 
-- (instancetype)initWithMinutes:(NSInteger)minutes maxMinutes:(NSInteger)maxMinutes title:(NSString *)title confirmTitle:(NSString *)confirmTitle hourTitle:(NSString *)hourTitle minuteTitle:(NSString *)minuteTitle {
+- (instancetype)initWithMinutes:(NSInteger)minutes maxMinutes:(NSInteger)maxMinutes title:(NSString *)title confirmTitle:(NSString *)confirmTitle hourTitle:(NSString *)hourTitle minuteTitle:(NSString *)minuteTitle confirmButtonColor:(UIColor *)confirmButtonColor {
   self = [super init];
   if (self != nil) {
     _maxMinutes = MAX(maxMinutes, 1);
@@ -2446,6 +2497,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
     _confirmTitle = confirmTitle.length ? confirmTitle : @"Confirm";
     _hourTitle = hourTitle.length ? hourTitle : @"Hours";
     _minuteTitle = minuteTitle.length ? minuteTitle : @"Minutes";
+    _confirmButtonColor = confirmButtonColor ?: [UIColor colorWithRed:98.0 / 255.0 green:229.0 / 255.0 blue:132.0 / 255.0 alpha:1];
   }
   return self;
 }
@@ -2511,10 +2563,15 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   self.confirmButton = [UIButton buttonWithType:UIButtonTypeSystem];
   self.confirmButton.translatesAutoresizingMaskIntoConstraints = NO;
   [self.confirmButton setTitle:self.confirmTitle forState:UIControlStateNormal];
-  [self.confirmButton setTitleColor:[UIColor colorWithWhite:0.12 alpha:1] forState:UIControlStateNormal];
-  self.confirmButton.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
-  self.confirmButton.backgroundColor = [UIColor colorWithRed:98.0 / 255.0 green:229.0 / 255.0 blue:132.0 / 255.0 alpha:1];
-  self.confirmButton.layer.cornerRadius = 28;
+  UIColor *confirmTextColor = LXColorNeedsDarkText(self.confirmButtonColor)
+    ? [UIColor colorWithWhite:0.12 alpha:1]
+    : [UIColor whiteColor];
+  [self.confirmButton setTitleColor:confirmTextColor forState:UIControlStateNormal];
+  self.confirmButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+  self.confirmButton.backgroundColor = self.confirmButtonColor;
+  self.confirmButton.layer.cornerCurve = kCACornerCurveContinuous;
+  self.confirmButton.layer.cornerRadius = 16;
+  self.confirmButton.contentEdgeInsets = UIEdgeInsetsMake(0, 18, 0, 18);
   [self.confirmButton addTarget:self action:@selector(handleConfirm) forControlEvents:UIControlEventTouchUpInside];
 
   [self.headerView addSubview:self.titleLabel];
@@ -2552,13 +2609,14 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   self.minuteValueOverlayLabel.textColor = [UIColor labelColor];
   self.minuteValueOverlayLabel.textAlignment = NSTextAlignmentCenter;
 
-  [self.pickerView addSubview:self.selectionOverlay];
+  [self.sheetView addSubview:self.selectionOverlay];
   [self.selectionOverlay addSubview:self.hourValueOverlayLabel];
   [self.selectionOverlay addSubview:self.minuteValueOverlayLabel];
   [self.selectionOverlay addSubview:self.hourOverlayLabel];
   [self.selectionOverlay addSubview:self.minuteOverlayLabel];
   [self.sheetView addSubview:self.headerView];
   [self.sheetView addSubview:self.pickerView];
+  [self.sheetView bringSubviewToFront:self.selectionOverlay];
 
   UILayoutGuide *safeArea = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
@@ -2582,7 +2640,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
     [self.confirmButton.trailingAnchor constraintEqualToAnchor:self.headerView.trailingAnchor],
     [self.confirmButton.centerYAnchor constraintEqualToAnchor:self.headerView.centerYAnchor],
-    [self.confirmButton.widthAnchor constraintEqualToConstant:64],
+    [self.confirmButton.widthAnchor constraintEqualToConstant:96],
     [self.confirmButton.heightAnchor constraintEqualToConstant:32],
 
     [self.pickerView.topAnchor constraintEqualToAnchor:self.headerView.bottomAnchor constant:20],
@@ -2601,10 +2659,10 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
 
-  CGFloat overlayWidth = MIN(CGRectGetWidth(self.pickerView.bounds) - 40, 600);
+  CGFloat overlayWidth = MIN(CGRectGetWidth(self.pickerView.bounds) - 28, 600);
   CGFloat overlayHeight = 64;
-  CGFloat overlayX = floor((CGRectGetWidth(self.pickerView.bounds) - overlayWidth) / 2.0);
-  CGFloat overlayY = floor((CGRectGetHeight(self.pickerView.bounds) - overlayHeight) / 2.0);
+  CGFloat overlayX = floor(CGRectGetMinX(self.pickerView.frame) + (CGRectGetWidth(self.pickerView.bounds) - overlayWidth) / 2.0);
+  CGFloat overlayY = floor(CGRectGetMinY(self.pickerView.frame) + (CGRectGetHeight(self.pickerView.bounds) - overlayHeight) / 2.0);
   self.selectionOverlay.frame = CGRectMake(overlayX, overlayY, overlayWidth, overlayHeight);
 
   CGFloat contentY = floor((overlayHeight - 44) / 2.0);
@@ -2760,11 +2818,13 @@ RCT_REMAP_METHOD(open, openPicker:(NSDictionary *)options resolver:(RCTPromiseRe
     NSString *cancelTitle = [options[@"cancelTitle"] isKindOfClass:[NSString class]] ? options[@"cancelTitle"] : @"";
     NSString *hourTitle = [options[@"hourTitle"] isKindOfClass:[NSString class]] ? options[@"hourTitle"] : @"";
     NSString *minuteTitle = [options[@"minuteTitle"] isKindOfClass:[NSString class]] ? options[@"minuteTitle"] : @"";
+    NSString *confirmButtonColorString = [options[@"confirmButtonColor"] isKindOfClass:[NSString class]] ? options[@"confirmButtonColor"] : @"";
 
     NSInteger maxMinutes = MAX(maxMinutesNumber != nil ? maxMinutesNumber.integerValue : 24 * 60, 1);
     NSInteger minutes = MIN(MAX(minutesNumber != nil ? minutesNumber.integerValue : 10, 0), maxMinutes);
+    UIColor *confirmButtonColor = LXColorFromString(confirmButtonColorString, [UIColor colorWithRed:98.0 / 255.0 green:229.0 / 255.0 blue:132.0 / 255.0 alpha:1]);
 
-    LXModernCountdownPickerViewController *pickerController = [[LXModernCountdownPickerViewController alloc] initWithMinutes:minutes maxMinutes:maxMinutes title:title confirmTitle:confirmTitle hourTitle:hourTitle minuteTitle:minuteTitle];
+    LXModernCountdownPickerViewController *pickerController = [[LXModernCountdownPickerViewController alloc] initWithMinutes:minutes maxMinutes:maxMinutes title:title confirmTitle:confirmTitle hourTitle:hourTitle minuteTitle:minuteTitle confirmButtonColor:confirmButtonColor];
     __weak CountdownPickerModule *weakSelf = self;
     pickerController.onCancel = ^{
       __strong CountdownPickerModule *strongSelf = weakSelf;

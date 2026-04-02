@@ -1085,6 +1085,8 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) NSUInteger channels;
 @property (nonatomic, assign) NSUInteger bitsPerSample;
 @property (nonatomic, assign) double startThresholdSeconds;
+@property (nonatomic, assign) double normalStartThresholdSeconds;
+@property (nonatomic, assign) double seekStartThresholdSeconds;
 @property (nonatomic, assign) double maxBufferSeconds;
 @property (nonatomic, assign) double pausedBufferSeconds;
 @property (nonatomic, assign) double lastKnownPosition;
@@ -1100,6 +1102,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) int64_t streamLengthBytes;
 @property (nonatomic, assign) BOOL seekRequested;
 @property (nonatomic, assign) BOOL seekInProgress;
+@property (nonatomic, assign) BOOL fastForwardSeekActive;
 @property (nonatomic, assign) NSUInteger rangeChunkSize;
 #if LX_HAS_LIBFLAC
 @property (nonatomic, assign) FLAC__StreamDecoder *decoder;
@@ -1132,7 +1135,9 @@ RCT_EXPORT_MODULE();
     _decoderQueue = dispatch_queue_create("cn.toside.music.mobile.streamingflac.decoder", DISPATCH_QUEUE_SERIAL);
     _renderQueue = dispatch_queue_create("cn.toside.music.mobile.streamingflac.render", DISPATCH_QUEUE_SERIAL);
     _currentState = @"idle";
-    _startThresholdSeconds = 1.5;
+    _normalStartThresholdSeconds = 1.5;
+    _seekStartThresholdSeconds = 0.25;
+    _startThresholdSeconds = _normalStartThresholdSeconds;
     _maxBufferSeconds = 8.0;
     _pausedBufferSeconds = 2.0;
     _rangeChunkSize = 262144;
@@ -1216,10 +1221,12 @@ RCT_EXPORT_MODULE();
   self.seekTargetFrame = 0;
   self.seekRequested = NO;
   self.seekInProgress = NO;
+  self.fastForwardSeekActive = NO;
   self.playbackGeneration += 1;
   self.playbackAnchorFrame = 0;
   self.currentByteOffset = 0;
   self.streamLengthBytes = 0;
+  self.startThresholdSeconds = self.normalStartThresholdSeconds;
   self.outputFormat = nil;
 }
 
@@ -1290,6 +1297,8 @@ RCT_EXPORT_MODULE();
   if (!self.playbackStarted && (queuedSeconds >= self.startThresholdSeconds || (self.downloadCompleted && self.queuedFrames > 0))) {
     [self.playerNode play];
     self.playbackStarted = YES;
+    self.fastForwardSeekActive = NO;
+    self.startThresholdSeconds = self.normalStartThresholdSeconds;
     [self emitState:@"playing" position:@(self.lastKnownPosition) duration:@(self.duration)];
   }
 }
@@ -1449,6 +1458,8 @@ RCT_EXPORT_MODULE();
   self.seekRequested = NO;
   self.seekTargetFrame = (int64_t)targetSample;
   self.seekInProgress = YES;
+  self.fastForwardSeekActive = NO;
+  self.startThresholdSeconds = self.seekStartThresholdSeconds;
 
   dispatch_sync(self.renderQueue, ^{
     self.playbackGeneration += 1;
@@ -1700,6 +1711,17 @@ RCT_REMAP_METHOD(seekTo, seekToStream:(nonnull NSNumber *)position resolver:(RCT
 
   double requestedPosition = MAX([position doubleValue], 0);
   if (self.duration > 0) requestedPosition = LXClampDouble(requestedPosition, 0, self.duration);
+  __block double currentPosition = 0;
+  __block double queuedSeconds = 0;
+  dispatch_sync(self.renderQueue, ^{
+    currentPosition = [self currentPlaybackPositionLocked];
+    queuedSeconds = self.sampleRate > 0 ? (double)self.queuedFrames / self.sampleRate : 0;
+  });
+  BOOL canUseFastForwardSeek =
+    self.decoder != NULL &&
+    requestedPosition > currentPosition &&
+    (requestedPosition - currentPosition) <= 20 &&
+    (requestedPosition - currentPosition) >= MAX(queuedSeconds - 0.15, 0);
 
   dispatch_sync(self.renderQueue, ^{
     self.lastKnownPosition = requestedPosition;
@@ -1712,9 +1734,12 @@ RCT_REMAP_METHOD(seekTo, seekToStream:(nonnull NSNumber *)position resolver:(RCT
   });
 
   self.pendingSeekPosition = requestedPosition;
-  self.seekRequested = YES;
+  self.seekRequested = !canUseFastForwardSeek;
   self.seekInProgress = self.sampleRate > 0 && requestedPosition > 0;
+  self.fastForwardSeekActive = canUseFastForwardSeek;
+  self.startThresholdSeconds = self.seekStartThresholdSeconds;
   self.currentState = self.manualPause ? @"paused" : @"buffering";
+  if (canUseFastForwardSeek) self.seekTargetFrame = self.sampleRate > 0 ? (int64_t)llround(requestedPosition * self.sampleRate) : 0;
 
   [self.streamCondition lock];
   [self.streamCondition broadcast];

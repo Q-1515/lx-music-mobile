@@ -228,7 +228,7 @@ const WheelColumn = ({
     const active = item == selected
     return (
       <View style={styles.wheelItem}>
-        <Text size={active ? 20 : 17} color={active ? theme['c-font'] : theme['c-font-label']}>{item.toString().padStart(2, '0')}</Text>
+        <Text size={active ? 20 : 17} color={active ? theme['c-font'] : theme['c-font-label']}>{String(item)}</Text>
       </View>
     )
   }
@@ -438,7 +438,7 @@ export default forwardRef<TimeoutExitEditModalType, TimeoutExitEditModalProps>((
   const customValueText = useMemo(() => {
     if (!storedCustomMinutes) return t('timeout_exit_option_custom_placeholder')
     const { hours, minutes } = parseMinutes(storedCustomMinutes)
-    return `${hours.toString().padStart(2, '0')} ${t('timeout_exit_hour')} ${minutes.toString().padStart(2, '0')} ${t('timeout_exit_min')}`
+    return `${hours} ${t('timeout_exit_hour')} ${minutes} ${t('timeout_exit_min')}`
   }, [storedCustomMinutes, t])
 
   return (

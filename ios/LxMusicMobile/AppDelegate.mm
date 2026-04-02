@@ -2410,6 +2410,8 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 @interface LXModernCountdownPickerViewController : UIViewController<UIPickerViewDataSource, UIPickerViewDelegate, UIAdaptivePresentationControllerDelegate>
 @property (nonatomic, strong) UIPickerView *pickerView;
+@property (nonatomic, strong) UIView *dimmingView;
+@property (nonatomic, strong) UIView *sheetView;
 @property (nonatomic, assign) NSInteger selectedHours;
 @property (nonatomic, assign) NSInteger selectedMinutes;
 @property (nonatomic, assign) NSInteger maxMinutes;
@@ -2423,6 +2425,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, strong) UIView *selectionOverlay;
 @property (nonatomic, strong) UILabel *hourOverlayLabel;
 @property (nonatomic, strong) UILabel *minuteOverlayLabel;
+@property (nonatomic, assign) NSInteger selectedMinuteRow;
 @property (nonatomic, copy) void (^onConfirm)(NSInteger totalMinutes);
 @property (nonatomic, copy) void (^onCancel)(void);
 @property (nonatomic, assign) BOOL isCompleting;
@@ -2455,10 +2458,44 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   return MAX((self.maxMinutes % 60) + 1, 1);
 }
 
+- (NSInteger)loopedMinuteRowCountForHour:(NSInteger)hour {
+  NSInteger minuteCount = [self minuteCountForHour:hour];
+  if (minuteCount <= 1) return 1;
+  return minuteCount * 200;
+}
+
+- (NSInteger)minuteValueForRow:(NSInteger)row hour:(NSInteger)hour {
+  NSInteger minuteCount = [self minuteCountForHour:hour];
+  if (minuteCount <= 1) return 0;
+  NSInteger value = row % minuteCount;
+  return value < 0 ? value + minuteCount : value;
+}
+
+- (NSInteger)loopedMinuteRowForValue:(NSInteger)value hour:(NSInteger)hour {
+  NSInteger minuteCount = [self minuteCountForHour:hour];
+  if (minuteCount <= 1) return 0;
+  NSInteger safeValue = MIN(MAX(value, 0), minuteCount - 1);
+  NSInteger middleCycle = ([self loopedMinuteRowCountForHour:hour] / minuteCount) / 2;
+  return middleCycle * minuteCount + safeValue;
+}
+
 - (void)viewDidLoad {
   [super viewDidLoad];
-  self.view.backgroundColor = [UIColor systemBackgroundColor];
-  self.navigationController.navigationBarHidden = YES;
+  self.view.backgroundColor = [UIColor clearColor];
+
+  self.dimmingView = [[UIView alloc] init];
+  self.dimmingView.translatesAutoresizingMaskIntoConstraints = NO;
+  self.dimmingView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.4];
+  UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleBackdropTap)];
+  [self.dimmingView addGestureRecognizer:tap];
+  [self.view addSubview:self.dimmingView];
+
+  self.sheetView = [[UIView alloc] init];
+  self.sheetView.translatesAutoresizingMaskIntoConstraints = NO;
+  self.sheetView.backgroundColor = [UIColor systemBackgroundColor];
+  self.sheetView.layer.cornerRadius = 20;
+  self.sheetView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+  [self.view addSubview:self.sheetView];
 
   self.headerView = [[UIView alloc] init];
   self.headerView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -2503,53 +2540,67 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   self.minuteOverlayLabel.textColor = [UIColor labelColor];
   self.minuteOverlayLabel.textAlignment = NSTextAlignmentCenter;
 
-  [self.selectionOverlay addSubview:self.hourOverlayLabel];
-  [self.selectionOverlay addSubview:self.minuteOverlayLabel];
   [self.pickerView addSubview:self.selectionOverlay];
-  [self.pickerView sendSubviewToBack:self.selectionOverlay];
-
-  [self.view addSubview:self.headerView];
-  [self.view addSubview:self.pickerView];
+  [self.sheetView addSubview:self.headerView];
+  [self.sheetView addSubview:self.pickerView];
+  [self.sheetView addSubview:self.hourOverlayLabel];
+  [self.sheetView addSubview:self.minuteOverlayLabel];
 
   UILayoutGuide *safeArea = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
-    [self.headerView.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:10],
-    [self.headerView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:18],
-    [self.headerView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-18],
-    [self.headerView.heightAnchor constraintEqualToConstant:60],
+    [self.dimmingView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+    [self.dimmingView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+    [self.dimmingView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+    [self.dimmingView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+    [self.sheetView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+    [self.sheetView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+    [self.sheetView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+    [self.sheetView.heightAnchor constraintEqualToConstant:340],
+
+    [self.headerView.topAnchor constraintEqualToAnchor:self.sheetView.topAnchor constant:20],
+    [self.headerView.leadingAnchor constraintEqualToAnchor:self.sheetView.leadingAnchor constant:20],
+    [self.headerView.trailingAnchor constraintEqualToAnchor:self.sheetView.trailingAnchor constant:-20],
+    [self.headerView.heightAnchor constraintEqualToConstant:56],
 
     [self.titleLabel.leadingAnchor constraintEqualToAnchor:self.headerView.leadingAnchor constant:4],
     [self.titleLabel.centerYAnchor constraintEqualToAnchor:self.headerView.centerYAnchor],
 
     [self.confirmButton.trailingAnchor constraintEqualToAnchor:self.headerView.trailingAnchor],
     [self.confirmButton.centerYAnchor constraintEqualToAnchor:self.headerView.centerYAnchor],
-    [self.confirmButton.widthAnchor constraintEqualToConstant:100],
-    [self.confirmButton.heightAnchor constraintEqualToConstant:56],
+    [self.confirmButton.widthAnchor constraintEqualToConstant:64],
+    [self.confirmButton.heightAnchor constraintEqualToConstant:32],
 
-    [self.pickerView.topAnchor constraintEqualToAnchor:self.headerView.bottomAnchor constant:18],
-    [self.pickerView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:10],
-    [self.pickerView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-10],
-    [self.pickerView.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-12],
-    [self.pickerView.heightAnchor constraintEqualToConstant:290],
+    [self.pickerView.topAnchor constraintEqualToAnchor:self.headerView.bottomAnchor constant:20],
+    [self.pickerView.leadingAnchor constraintEqualToAnchor:self.sheetView.leadingAnchor constant:20],
+    [self.pickerView.trailingAnchor constraintEqualToAnchor:self.sheetView.trailingAnchor constant:-20],
+    [self.pickerView.bottomAnchor constraintEqualToAnchor:self.sheetView.safeAreaLayoutGuide.bottomAnchor constant:-20],
   ]];
 
   [self.pickerView selectRow:self.selectedHours inComponent:0 animated:NO];
   [self.pickerView reloadComponent:1];
-  [self.pickerView selectRow:self.selectedMinutes inComponent:1 animated:NO];
+  self.selectedMinuteRow = [self loopedMinuteRowForValue:self.selectedMinutes hour:self.selectedHours];
+  [self.pickerView selectRow:self.selectedMinuteRow inComponent:1 animated:NO];
 }
 
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
 
-  CGFloat overlayWidth = MIN(CGRectGetWidth(self.pickerView.bounds) - 36, 640);
+  CGFloat overlayWidth = MIN(CGRectGetWidth(self.pickerView.bounds) - 40, 600);
   CGFloat overlayHeight = 64;
   CGFloat overlayX = floor((CGRectGetWidth(self.pickerView.bounds) - overlayWidth) / 2.0);
   CGFloat overlayY = floor((CGRectGetHeight(self.pickerView.bounds) - overlayHeight) / 2.0);
   self.selectionOverlay.frame = CGRectMake(overlayX, overlayY, overlayWidth, overlayHeight);
 
-  CGFloat halfWidth = overlayWidth / 2.0;
-  self.hourOverlayLabel.frame = CGRectMake(halfWidth - 8, 0, 80, overlayHeight);
-  self.minuteOverlayLabel.frame = CGRectMake(overlayWidth - 92, 0, 80, overlayHeight);
+  CGFloat pickerMinX = CGRectGetMinX(self.pickerView.frame);
+  CGFloat pickerWidth = CGRectGetWidth(self.pickerView.frame);
+  CGFloat componentWidth = [self pickerView:self.pickerView widthForComponent:0];
+  CGFloat leftComponentCenterX = pickerMinX + pickerWidth * 0.25;
+  CGFloat rightComponentCenterX = pickerMinX + pickerWidth * 0.75;
+  CGFloat overlayCenterY = CGRectGetMidY(self.pickerView.frame);
+
+  self.hourOverlayLabel.frame = CGRectMake(leftComponentCenterX + componentWidth * 0.18, overlayCenterY - 22, 64, 44);
+  self.minuteOverlayLabel.frame = CGRectMake(rightComponentCenterX + componentWidth * 0.18, overlayCenterY - 22, 64, 44);
 }
 
 - (NSInteger)numberOfComponentsInPickerView:(UIPickerView *)pickerView {
@@ -2558,24 +2609,20 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 - (NSInteger)pickerView:(UIPickerView *)pickerView numberOfRowsInComponent:(NSInteger)component {
   if (component == 0) return [self maxHour] + 1;
-  return [self minuteCountForHour:self.selectedHours];
+  return [self loopedMinuteRowCountForHour:self.selectedHours];
 }
 
 - (CGFloat)pickerView:(UIPickerView *)pickerView widthForComponent:(NSInteger)component {
-  return floor(CGRectGetWidth(pickerView.bounds) / 2.0) - 6;
+  return floor(CGRectGetWidth(pickerView.bounds) / 2.0) - 8;
 }
 
 - (CGFloat)pickerView:(UIPickerView *)pickerView rowHeightForComponent:(NSInteger)component {
-  return 52;
+  return 48.0;
 }
 
-- (UIView *)pickerView:(UIPickerView *)pickerView viewForRow:(NSInteger)row forComponent:(NSInteger)component reusingView:(UIView *)view {
-  UILabel *label = [view isKindOfClass:[UILabel class]] ? (UILabel *)view : [[UILabel alloc] init];
-  label.textAlignment = NSTextAlignmentCenter;
-  label.font = [UIFont monospacedDigitSystemFontOfSize:26 weight:UIFontWeightRegular];
-  label.textColor = [UIColor colorWithWhite:0.25 alpha:1];
-  label.text = [NSString stringWithFormat:@"%02ld", (long)row];
-  return label;
+- (NSString *)pickerView:(UIPickerView *)pickerView titleForRow:(NSInteger)row forComponent:(NSInteger)component {
+  NSInteger displayValue = component == 0 ? row : [self minuteValueForRow:row hour:self.selectedHours];
+  return [NSString stringWithFormat:@"%ld", (long)displayValue];
 }
 
 - (void)pickerView:(UIPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
@@ -2584,16 +2631,33 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
     NSInteger minuteCount = [self minuteCountForHour:self.selectedHours];
     if (self.selectedMinutes >= minuteCount) self.selectedMinutes = minuteCount - 1;
     [pickerView reloadComponent:1];
-    [pickerView selectRow:self.selectedMinutes inComponent:1 animated:YES];
+    self.selectedMinuteRow = [self loopedMinuteRowForValue:self.selectedMinutes hour:self.selectedHours];
+    [pickerView selectRow:self.selectedMinuteRow inComponent:1 animated:NO];
+    [pickerView reloadComponent:0];
     return;
   }
-  self.selectedMinutes = row;
+  self.selectedMinutes = [self minuteValueForRow:row hour:self.selectedHours];
+  self.selectedMinuteRow = row;
+  NSInteger minuteCount = [self minuteCountForHour:self.selectedHours];
+  if (minuteCount > 1) {
+    NSInteger edgeThreshold = minuteCount * 8;
+    NSInteger rowCount = [self loopedMinuteRowCountForHour:self.selectedHours];
+    if (row < edgeThreshold || row > rowCount - edgeThreshold) {
+      self.selectedMinuteRow = [self loopedMinuteRowForValue:self.selectedMinutes hour:self.selectedHours];
+      [pickerView selectRow:self.selectedMinuteRow inComponent:1 animated:NO];
+    }
+  }
+  [pickerView reloadComponent:1];
 }
 
 - (void)finishWithCancel {
   if (self.isCompleting) return;
   self.isCompleting = YES;
   if (self.onCancel != nil) self.onCancel();
+}
+
+- (void)handleBackdropTap {
+  [self finishWithCancel];
 }
 
 - (void)handleConfirm {
@@ -2612,7 +2676,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @interface CountdownPickerModule : NSObject<RCTBridgeModule, UIAdaptivePresentationControllerDelegate>
 @property (nonatomic, copy) RCTPromiseResolveBlock pickerResolve;
 @property (nonatomic, copy) RCTPromiseRejectBlock pickerReject;
-@property (nonatomic, strong) UINavigationController *pickerNavigationController;
+@property (nonatomic, strong) LXModernCountdownPickerViewController *pickerController;
 @property (nonatomic, assign) BOOL pickerCompleting;
 @end
 
@@ -2627,7 +2691,7 @@ RCT_EXPORT_MODULE();
 - (void)resetPickerState {
   self.pickerResolve = nil;
   self.pickerReject = nil;
-  self.pickerNavigationController = nil;
+  self.pickerController = nil;
   self.pickerCompleting = NO;
 }
 
@@ -2635,7 +2699,7 @@ RCT_EXPORT_MODULE();
   if (self.pickerCompleting) return;
   self.pickerCompleting = YES;
 
-  UINavigationController *navigationController = self.pickerNavigationController;
+  UIViewController *pickerController = self.pickerController;
   RCTPromiseResolveBlock resolve = self.pickerResolve;
   [self resetPickerState];
 
@@ -2643,8 +2707,8 @@ RCT_EXPORT_MODULE();
     if (resolve != nil) resolve(value);
   };
 
-  if (navigationController.presentingViewController != nil) {
-    [navigationController dismissViewControllerAnimated:YES completion:finish];
+  if (pickerController.presentingViewController != nil) {
+    [pickerController dismissViewControllerAnimated:YES completion:finish];
     return;
   }
   finish();
@@ -2660,7 +2724,7 @@ RCT_EXPORT_MODULE();
 
 RCT_REMAP_METHOD(open, openPicker:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
-    if (self.pickerResolve != nil || self.pickerNavigationController != nil) {
+    if (self.pickerResolve != nil || self.pickerController != nil) {
       reject(@"picker_busy", @"Another countdown picker is already active", LXError(@"picker_busy", @"Another countdown picker is already active"));
       return;
     }
@@ -2695,22 +2759,14 @@ RCT_REMAP_METHOD(open, openPicker:(NSDictionary *)options resolver:(RCTPromiseRe
       [strongSelf completePickerWithValue:@(totalMinutes)];
     };
 
-    UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:pickerController];
-    navigationController.modalPresentationStyle = UIModalPresentationPageSheet;
-    navigationController.presentationController.delegate = self;
-    if (@available(iOS 15.0, *)) {
-      UISheetPresentationController *sheetPresentationController = navigationController.sheetPresentationController;
-      if (sheetPresentationController != nil) {
-        sheetPresentationController.detents = @[ [UISheetPresentationControllerDetent mediumDetent] ];
-        sheetPresentationController.prefersGrabberVisible = YES;
-        sheetPresentationController.preferredCornerRadius = 24;
-      }
-    }
+    pickerController.modalPresentationStyle = UIModalPresentationOverFullScreen;
+    pickerController.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+    pickerController.presentationController.delegate = self;
 
     self.pickerResolve = resolve;
     self.pickerReject = reject;
-    self.pickerNavigationController = navigationController;
-    [controller presentViewController:navigationController animated:YES completion:nil];
+    self.pickerController = pickerController;
+    [controller presentViewController:pickerController animated:YES completion:nil];
   });
 }
 

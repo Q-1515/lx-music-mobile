@@ -38,6 +38,15 @@ export default () => {
       boardId: id,
     })
   }
+  const syncBoardsList = (source: LX.OnlineSource, id: string | null) => {
+    if (!id) return
+    void getBoardsList(source).then(list => {
+      if (!list.length) return
+      requestAnimationFrame(() => {
+        boardsListRef.current?.setList(list, id)
+      })
+    })
+  }
   const resolveBoardId = (list: BoardItem[], boardId: string | null) => {
     if (!list.length) return null
     return list.some((item: { id: string }) => item.id == boardId) ? boardId : list[0].id
@@ -64,6 +73,7 @@ export default () => {
     void handleCollect(id, name, boundInfo.current.source)
   }
   const onShowBound = () => {
+    syncBoardsList(boundInfo.current.source, boundInfo.current.id)
     requestAnimationFrame(() => {
       drawer.current?.openDrawer()
     })

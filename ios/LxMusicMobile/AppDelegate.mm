@@ -2408,24 +2408,29 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 
 @end
 
-@interface LXCountdownPickerViewController : UIViewController<UIPickerViewDataSource, UIPickerViewDelegate, UIAdaptivePresentationControllerDelegate>
+@interface LXModernCountdownPickerViewController : UIViewController<UIPickerViewDataSource, UIPickerViewDelegate, UIAdaptivePresentationControllerDelegate>
 @property (nonatomic, strong) UIPickerView *pickerView;
 @property (nonatomic, assign) NSInteger selectedHours;
 @property (nonatomic, assign) NSInteger selectedMinutes;
 @property (nonatomic, assign) NSInteger maxMinutes;
 @property (nonatomic, copy) NSString *pickerTitle;
 @property (nonatomic, copy) NSString *confirmTitle;
-@property (nonatomic, copy) NSString *cancelTitle;
 @property (nonatomic, copy) NSString *hourTitle;
 @property (nonatomic, copy) NSString *minuteTitle;
+@property (nonatomic, strong) UIView *headerView;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UIButton *confirmButton;
+@property (nonatomic, strong) UIView *selectionOverlay;
+@property (nonatomic, strong) UILabel *hourOverlayLabel;
+@property (nonatomic, strong) UILabel *minuteOverlayLabel;
 @property (nonatomic, copy) void (^onConfirm)(NSInteger totalMinutes);
 @property (nonatomic, copy) void (^onCancel)(void);
 @property (nonatomic, assign) BOOL isCompleting;
 @end
 
-@implementation LXCountdownPickerViewController
+@implementation LXModernCountdownPickerViewController
 
-- (instancetype)initWithMinutes:(NSInteger)minutes maxMinutes:(NSInteger)maxMinutes title:(NSString *)title confirmTitle:(NSString *)confirmTitle cancelTitle:(NSString *)cancelTitle hourTitle:(NSString *)hourTitle minuteTitle:(NSString *)minuteTitle {
+- (instancetype)initWithMinutes:(NSInteger)minutes maxMinutes:(NSInteger)maxMinutes title:(NSString *)title confirmTitle:(NSString *)confirmTitle hourTitle:(NSString *)hourTitle minuteTitle:(NSString *)minuteTitle {
   self = [super init];
   if (self != nil) {
     _maxMinutes = MAX(maxMinutes, 1);
@@ -2434,7 +2439,6 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
     _selectedMinutes = clampedMinutes % 60;
     _pickerTitle = title ?: @"";
     _confirmTitle = confirmTitle.length ? confirmTitle : @"Confirm";
-    _cancelTitle = cancelTitle.length ? cancelTitle : @"Cancel";
     _hourTitle = hourTitle.length ? hourTitle : @"Hours";
     _minuteTitle = minuteTitle.length ? minuteTitle : @"Minutes";
   }
@@ -2454,55 +2458,98 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 - (void)viewDidLoad {
   [super viewDidLoad];
   self.view.backgroundColor = [UIColor systemBackgroundColor];
-  self.navigationItem.title = self.pickerTitle;
-  self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:self.cancelTitle style:UIBarButtonItemStylePlain target:self action:@selector(handleCancel)];
-  self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:self.confirmTitle style:UIBarButtonItemStyleDone target:self action:@selector(handleConfirm)];
+  self.navigationController.navigationBarHidden = YES;
 
-  UILabel *hourLabel = [[UILabel alloc] init];
-  hourLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  hourLabel.text = @"小时";
-  hourLabel.textAlignment = NSTextAlignmentCenter;
-  hourLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-  hourLabel.textColor = [UIColor secondaryLabelColor];
-  hourLabel.text = self.hourTitle;
+  self.headerView = [[UIView alloc] init];
+  self.headerView.translatesAutoresizingMaskIntoConstraints = NO;
 
-  UILabel *minuteLabel = [[UILabel alloc] init];
-  minuteLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  minuteLabel.text = @"分钟";
-  minuteLabel.textAlignment = NSTextAlignmentCenter;
-  minuteLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-  minuteLabel.textColor = [UIColor secondaryLabelColor];
-  minuteLabel.text = self.minuteTitle;
+  self.titleLabel = [[UILabel alloc] init];
+  self.titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+  self.titleLabel.text = self.pickerTitle;
+  self.titleLabel.font = [UIFont systemFontOfSize:23 weight:UIFontWeightSemibold];
+  self.titleLabel.textColor = [UIColor labelColor];
 
-  UIStackView *labelStack = [[UIStackView alloc] initWithArrangedSubviews:@[hourLabel, minuteLabel]];
-  labelStack.translatesAutoresizingMaskIntoConstraints = NO;
-  labelStack.axis = UILayoutConstraintAxisHorizontal;
-  labelStack.distribution = UIStackViewDistributionFillEqually;
-  labelStack.spacing = 16;
+  self.confirmButton = [UIButton buttonWithType:UIButtonTypeSystem];
+  self.confirmButton.translatesAutoresizingMaskIntoConstraints = NO;
+  [self.confirmButton setTitle:self.confirmTitle forState:UIControlStateNormal];
+  [self.confirmButton setTitleColor:[UIColor colorWithWhite:0.12 alpha:1] forState:UIControlStateNormal];
+  self.confirmButton.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+  self.confirmButton.backgroundColor = [UIColor colorWithRed:98.0 / 255.0 green:229.0 / 255.0 blue:132.0 / 255.0 alpha:1];
+  self.confirmButton.layer.cornerRadius = 28;
+  [self.confirmButton addTarget:self action:@selector(handleConfirm) forControlEvents:UIControlEventTouchUpInside];
+
+  [self.headerView addSubview:self.titleLabel];
+  [self.headerView addSubview:self.confirmButton];
 
   self.pickerView = [[UIPickerView alloc] init];
   self.pickerView.translatesAutoresizingMaskIntoConstraints = NO;
   self.pickerView.dataSource = self;
   self.pickerView.delegate = self;
 
-  [self.view addSubview:labelStack];
+  self.selectionOverlay = [[UIView alloc] init];
+  self.selectionOverlay.userInteractionEnabled = NO;
+  self.selectionOverlay.backgroundColor = [UIColor colorWithWhite:0.95 alpha:0.96];
+  self.selectionOverlay.layer.cornerRadius = 18;
+
+  self.hourOverlayLabel = [[UILabel alloc] init];
+  self.hourOverlayLabel.text = self.hourTitle;
+  self.hourOverlayLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightSemibold];
+  self.hourOverlayLabel.textColor = [UIColor labelColor];
+  self.hourOverlayLabel.textAlignment = NSTextAlignmentCenter;
+
+  self.minuteOverlayLabel = [[UILabel alloc] init];
+  self.minuteOverlayLabel.text = self.minuteTitle;
+  self.minuteOverlayLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightSemibold];
+  self.minuteOverlayLabel.textColor = [UIColor labelColor];
+  self.minuteOverlayLabel.textAlignment = NSTextAlignmentCenter;
+
+  [self.selectionOverlay addSubview:self.hourOverlayLabel];
+  [self.selectionOverlay addSubview:self.minuteOverlayLabel];
+  [self.pickerView addSubview:self.selectionOverlay];
+  [self.pickerView sendSubviewToBack:self.selectionOverlay];
+
+  [self.view addSubview:self.headerView];
   [self.view addSubview:self.pickerView];
 
   UILayoutGuide *safeArea = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
-    [labelStack.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:18],
-    [labelStack.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:20],
-    [labelStack.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-20],
-    [self.pickerView.topAnchor constraintEqualToAnchor:labelStack.bottomAnchor constant:8],
-    [self.pickerView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:12],
-    [self.pickerView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-12],
-    [self.pickerView.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-8],
-    [self.pickerView.heightAnchor constraintEqualToConstant:216],
+    [self.headerView.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:10],
+    [self.headerView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:18],
+    [self.headerView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-18],
+    [self.headerView.heightAnchor constraintEqualToConstant:60],
+
+    [self.titleLabel.leadingAnchor constraintEqualToAnchor:self.headerView.leadingAnchor constant:4],
+    [self.titleLabel.centerYAnchor constraintEqualToAnchor:self.headerView.centerYAnchor],
+
+    [self.confirmButton.trailingAnchor constraintEqualToAnchor:self.headerView.trailingAnchor],
+    [self.confirmButton.centerYAnchor constraintEqualToAnchor:self.headerView.centerYAnchor],
+    [self.confirmButton.widthAnchor constraintEqualToConstant:100],
+    [self.confirmButton.heightAnchor constraintEqualToConstant:56],
+
+    [self.pickerView.topAnchor constraintEqualToAnchor:self.headerView.bottomAnchor constant:18],
+    [self.pickerView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:10],
+    [self.pickerView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-10],
+    [self.pickerView.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-12],
+    [self.pickerView.heightAnchor constraintEqualToConstant:290],
   ]];
 
   [self.pickerView selectRow:self.selectedHours inComponent:0 animated:NO];
   [self.pickerView reloadComponent:1];
   [self.pickerView selectRow:self.selectedMinutes inComponent:1 animated:NO];
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+
+  CGFloat overlayWidth = MIN(CGRectGetWidth(self.pickerView.bounds) - 36, 640);
+  CGFloat overlayHeight = 64;
+  CGFloat overlayX = floor((CGRectGetWidth(self.pickerView.bounds) - overlayWidth) / 2.0);
+  CGFloat overlayY = floor((CGRectGetHeight(self.pickerView.bounds) - overlayHeight) / 2.0);
+  self.selectionOverlay.frame = CGRectMake(overlayX, overlayY, overlayWidth, overlayHeight);
+
+  CGFloat halfWidth = overlayWidth / 2.0;
+  self.hourOverlayLabel.frame = CGRectMake(halfWidth - 8, 0, 80, overlayHeight);
+  self.minuteOverlayLabel.frame = CGRectMake(overlayWidth - 92, 0, 80, overlayHeight);
 }
 
 - (NSInteger)numberOfComponentsInPickerView:(UIPickerView *)pickerView {
@@ -2515,18 +2562,18 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 }
 
 - (CGFloat)pickerView:(UIPickerView *)pickerView widthForComponent:(NSInteger)component {
-  return floor(CGRectGetWidth(pickerView.bounds) / 2.0);
+  return floor(CGRectGetWidth(pickerView.bounds) / 2.0) - 6;
 }
 
 - (CGFloat)pickerView:(UIPickerView *)pickerView rowHeightForComponent:(NSInteger)component {
-  return 38;
+  return 52;
 }
 
 - (UIView *)pickerView:(UIPickerView *)pickerView viewForRow:(NSInteger)row forComponent:(NSInteger)component reusingView:(UIView *)view {
   UILabel *label = [view isKindOfClass:[UILabel class]] ? (UILabel *)view : [[UILabel alloc] init];
   label.textAlignment = NSTextAlignmentCenter;
-  label.font = [UIFont monospacedDigitSystemFontOfSize:30 weight:UIFontWeightRegular];
-  label.textColor = [UIColor labelColor];
+  label.font = [UIFont monospacedDigitSystemFontOfSize:26 weight:UIFontWeightRegular];
+  label.textColor = [UIColor colorWithWhite:0.25 alpha:1];
   label.text = [NSString stringWithFormat:@"%02ld", (long)row];
   return label;
 }
@@ -2547,10 +2594,6 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
   if (self.isCompleting) return;
   self.isCompleting = YES;
   if (self.onCancel != nil) self.onCancel();
-}
-
-- (void)handleCancel {
-  [self finishWithCancel];
 }
 
 - (void)handleConfirm {
@@ -2639,7 +2682,7 @@ RCT_REMAP_METHOD(open, openPicker:(NSDictionary *)options resolver:(RCTPromiseRe
     NSInteger maxMinutes = MAX(maxMinutesNumber != nil ? maxMinutesNumber.integerValue : 24 * 60, 1);
     NSInteger minutes = MIN(MAX(minutesNumber != nil ? minutesNumber.integerValue : 10, 0), maxMinutes);
 
-    LXCountdownPickerViewController *pickerController = [[LXCountdownPickerViewController alloc] initWithMinutes:minutes maxMinutes:maxMinutes title:title confirmTitle:confirmTitle cancelTitle:cancelTitle hourTitle:hourTitle minuteTitle:minuteTitle];
+    LXModernCountdownPickerViewController *pickerController = [[LXModernCountdownPickerViewController alloc] initWithMinutes:minutes maxMinutes:maxMinutes title:title confirmTitle:confirmTitle hourTitle:hourTitle minuteTitle:minuteTitle];
     __weak CountdownPickerModule *weakSelf = self;
     pickerController.onCancel = ^{
       __strong CountdownPickerModule *strongSelf = weakSelf;

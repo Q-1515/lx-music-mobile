@@ -475,18 +475,20 @@ export const handleGetOnlineLyricInfo = async({ musicInfo, onToggleSource, isRef
   lyricInfo: LX.Music.LyricInfo | LX.Player.LyricInfo
   isFromCache: boolean
 }> => {
-  if (!allowToggleSource) throw new Error(global.i18n.t('toggle_source_failed'))
-
-  onToggleSource()
-  return getOtherSource(musicInfo).then(async(otherSource) => {
-    if (otherSource.length) {
-      return getOnlineOtherSourceLyricInfo({
-        musicInfos: [...otherSource],
-        onToggleSource,
-        isRefresh,
-        retryedSource: [musicInfo.source],
-      })
-    }
-    throw new Error(global.i18n.t('toggle_source_failed'))
+  let reqPromise
+  try {
+    reqPromise = musicSdk[musicInfo.source].getLyric(toOldMusicInfo(musicInfo)).promise
+  } catch (err) {
+    reqPromise = Promise.reject(err)
+  }
+  return reqPromise.then(async(lyricInfo: LX.Music.LyricInfo) => {
+    return existTimeExp.test(lyricInfo.lyric) ? {
+      musicInfo,
+      lyricInfo,
+      isFromCache: false,
+    } : Promise.reject(new Error('failed'))
+  }).catch((err: any) => {
+    console.log(err)
+    throw err
   })
 }

@@ -104,8 +104,8 @@ export const getLyricInfo = async({ musicInfo, isRefresh, allowToggleSource = tr
   return handleGetOnlineLyricInfo({ musicInfo, onToggleSource, isRefresh, allowToggleSource }).then(async({ lyricInfo, musicInfo: targetMusicInfo, isFromCache }) => {
     // lrcRequest = null
     if (isFromCache) return buildLyricInfo(lyricInfo)
-    if (targetMusicInfo.id == musicInfo.id) void saveLyric(musicInfo, lyricInfo)
-    else void saveLyric(targetMusicInfo, lyricInfo)
+    void saveLyric(musicInfo, lyricInfo)
+    if (targetMusicInfo.id != musicInfo.id) void saveLyric(targetMusicInfo, lyricInfo)
 
     return buildLyricInfo(lyricInfo)
   })

@@ -444,7 +444,7 @@ export const getOnlineOtherSourceLyricInfo = async({ musicInfos, onToggleSource,
   let reqPromise
   try {
     // TODO: remove any type
-    reqPromise = (musicSdk[musicInfo.source].getLyric(toOldMusicInfo(musicInfo)) as any).promise
+    reqPromise = musicSdk[musicInfo.source].getLyric(toOldMusicInfo(musicInfo)).promise
   } catch (err: any) {
     reqPromise = Promise.reject(err)
   }
@@ -475,37 +475,18 @@ export const handleGetOnlineLyricInfo = async({ musicInfo, onToggleSource, isRef
   lyricInfo: LX.Music.LyricInfo | LX.Player.LyricInfo
   isFromCache: boolean
 }> => {
-  // console.log(musicInfo.source)
-  let reqPromise
-  try {
-    // TODO: remove any type
-    reqPromise = (musicSdk[musicInfo.source].getLyric(toOldMusicInfo(musicInfo)) as any).promise
-  } catch (err) {
-    reqPromise = Promise.reject(err)
-  }
-  return reqPromise.then(async(lyricInfo: LX.Music.LyricInfo) => {
-    return existTimeExp.test(lyricInfo.lyric) ? {
-      musicInfo,
-      lyricInfo,
-      isFromCache: false,
-    } : Promise.reject(new Error('failed'))
-  }).catch(async(err: any) => {
-    console.log(err)
-    if (!allowToggleSource) throw err
+  if (!allowToggleSource) throw new Error(global.i18n.t('toggle_source_failed'))
 
-    onToggleSource()
-    // eslint-disable-next-line @typescript-eslint/promise-function-async
-    return getOtherSource(musicInfo).then(otherSource => {
-      // console.log('find otherSource', otherSource.length)
-      if (otherSource.length) {
-        return getOnlineOtherSourceLyricInfo({
-          musicInfos: [...otherSource],
-          onToggleSource,
-          isRefresh,
-          retryedSource: [musicInfo.source],
-        })
-      }
-      throw err
-    })
+  onToggleSource()
+  return getOtherSource(musicInfo).then(async(otherSource) => {
+    if (otherSource.length) {
+      return getOnlineOtherSourceLyricInfo({
+        musicInfos: [...otherSource],
+        onToggleSource,
+        isRefresh,
+        retryedSource: [musicInfo.source],
+      })
+    }
+    throw new Error(global.i18n.t('toggle_source_failed'))
   })
 }

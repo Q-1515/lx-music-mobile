@@ -34,20 +34,24 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
   const [visible, setVisible] = useState(false)
   const currentListIdRef = useRef('')
   const currentKeywordRef = useRef('')
+  const currentSearchIdRef = useRef(0)
   const theme = useTheme()
 
   const handleShowList = (keyword: string, height: number) => {
     searchTipListRef.current?.setHeight(height)
     currentKeywordRef.current = keyword
+    const searchId = ++currentSearchIdRef.current
     const id = currentListIdRef.current = listState.activeListId
     if (keyword) {
       void getListMusics(id).then(list => {
+        if (currentListIdRef.current != id || currentKeywordRef.current != keyword || currentSearchIdRef.current != searchId) return
         debounceSearchList(keyword, list, (list) => {
-          if (currentListIdRef.current != id) return
+          if (currentListIdRef.current != id || currentKeywordRef.current != keyword || currentSearchIdRef.current != searchId) return
           searchTipListRef.current?.setList(list)
         })
       })
     } else {
+      currentSearchIdRef.current = searchId
       searchTipListRef.current?.setList([])
     }
   }
@@ -65,6 +69,7 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
     hide() {
       currentKeywordRef.current = ''
       currentListIdRef.current = ''
+      currentSearchIdRef.current++
       searchTipListRef.current?.setList([])
     },
   }))
@@ -73,9 +78,12 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
     const updateList = (id: string) => {
       currentListIdRef.current = id
       if (!currentKeywordRef.current) return
+      const keyword = currentKeywordRef.current
+      const searchId = ++currentSearchIdRef.current
       void getListMusics(listState.activeListId).then(list => {
-        debounceSearchList(currentKeywordRef.current, list, (list) => {
-          if (currentListIdRef.current != id) return
+        if (currentListIdRef.current != id || currentKeywordRef.current != keyword || currentSearchIdRef.current != searchId) return
+        debounceSearchList(keyword, list, (list) => {
+          if (currentListIdRef.current != id || currentKeywordRef.current != keyword || currentSearchIdRef.current != searchId) return
           searchTipListRef.current?.setList(list)
         })
       })

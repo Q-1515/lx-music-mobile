@@ -994,7 +994,7 @@ RCT_EXPORT_MODULE();
   }
 }
 
-RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNumber *)position volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNumber *)position volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate autoplay:(nonnull NSNumber *)autoplay resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (![filePath isKindOfClass:[NSString class]] || filePath.length == 0) {
       NSError *error = LXError(@"flac_player_path", @"Missing flac player file path");
@@ -1014,19 +1014,22 @@ RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNum
     self.player.volume = [volume floatValue];
     self.player.rate = MAX([rate floatValue], 0.5f);
     self.player.currentTime = LXClampDouble([position doubleValue], 0, self.player.duration);
-    self.manualPause = NO;
+    BOOL shouldAutoplay = autoplay == nil ? YES : [autoplay boolValue];
+    self.manualPause = !shouldAutoplay;
     self.interruptedBySystem = NO;
 
-    if (![self.player play]) {
-      NSError *playError = LXError(@"flac_player_play", @"Failed to start flac playback");
-      [self emitErrorMessage:playError.localizedDescription];
-      reject(@"flac_player_play", playError.localizedDescription, playError);
-      return;
+    if (shouldAutoplay) {
+      if (![self.player play]) {
+        NSError *playError = LXError(@"flac_player_play", @"Failed to start flac playback");
+        [self emitErrorMessage:playError.localizedDescription];
+        reject(@"flac_player_play", playError.localizedDescription, playError);
+        return;
+      }
     }
 
     NSNumber *currentPosition = @(self.player.currentTime);
     NSNumber *currentDuration = @(self.player.duration);
-    [self emitState:@"playing" position:currentPosition duration:currentDuration];
+    [self emitState:(shouldAutoplay ? @"playing" : @"paused") position:currentPosition duration:currentDuration];
     resolve(@{
       @"position": currentPosition,
       @"duration": currentDuration,
@@ -1814,7 +1817,7 @@ RCT_EXPORT_MODULE();
   }
 }
 
-RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDictionary *)headers volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDictionary *)headers volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate autoplay:(nonnull NSNumber *)autoplay resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (![urlString isKindOfClass:[NSString class]] || urlString.length == 0) {
       NSError *error = LXError(@"streaming_flac_url", @"Missing FLAC stream url");
@@ -1835,10 +1838,11 @@ RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDiction
     self.currentState = @"loading";
     self.currentVolume = [volume floatValue];
     self.currentRate = MAX([rate floatValue], 0.5f);
-    self.manualPause = NO;
+    BOOL shouldAutoplay = autoplay == nil ? YES : [autoplay boolValue];
+    self.manualPause = !shouldAutoplay;
     self.interruptedBySystem = NO;
     self.requestHeaders = [headers isKindOfClass:[NSDictionary class]] ? [headers copy] : @{};
-    [self emitState:@"loading" position:@0 duration:@0];
+    [self emitState:(shouldAutoplay ? @"loading" : @"paused") position:@0 duration:@0];
 
     NSURL *url = [NSURL URLWithString:urlString];
     if (url == nil) {

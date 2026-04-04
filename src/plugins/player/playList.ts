@@ -12,7 +12,6 @@ import {
   getNativeFlacState,
   getNativeFlacTrackId,
   isNativeFlacActive,
-  pauseNativeFlacPlayback,
   resetNativeFlacPlayback,
   shouldUseNativeFlacPlayer,
   startNativeFlacPlayback,
@@ -290,11 +289,8 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
         await TrackPlayer.stop().catch(() => {})
       })
       clearTracks()
-      const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time)
+      const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time, shouldAutoStart)
       global.lx.playerTrackId = getNativeFlacTrackId()
-      if (!shouldAutoStart) {
-        await pauseNativeFlacPlayback().catch(() => {})
-      }
       ensureCurrentTrackMetadata({
         title: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.name : musicInfo.name) ?? 'Unknow',
         artist: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.singer : musicInfo.singer) ?? 'Unknow',
@@ -361,11 +357,11 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
 }
 let playPromise = Promise.resolve()
 let actionId = Math.random()
-export const playMusic = (musicInfo: LX.Player.PlayMusic, url: string, time: number) => {
+export const playMusic = (musicInfo: LX.Player.PlayMusic, url: string, time: number, quality?: LX.Quality | null) => {
   const id = actionId = Math.random()
   void playPromise.finally(() => {
     if (id != actionId) return
-    playPromise = handlePlayMusic(musicInfo, url, time).catch((err: Error & { lxHandled?: boolean }) => {
+    playPromise = handlePlayMusic(musicInfo, url, time, quality).catch((err: Error & { lxHandled?: boolean }) => {
       console.log(err)
       if (!err?.lxHandled) {
         global.app_event.error()

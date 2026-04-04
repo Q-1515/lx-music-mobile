@@ -30,7 +30,7 @@ export type StreamingFlacEvent =
   | StreamingFlacEndedEvent
 
 interface NativeStreamingFlacModule {
-  openStream?: (url: string, headers?: Record<string, string>, volume?: number, rate?: number) => Promise<void>
+  openStream?: (url: string, headers?: Record<string, string>, volume?: number, rate?: number, autoplay?: boolean) => Promise<void>
   resume?: () => Promise<void>
   pause?: () => Promise<void>
   stop?: () => Promise<void>
@@ -60,9 +60,9 @@ const assertSupported = <K extends keyof NativeStreamingFlacModule>(method: K) =
 
 export const isStreamingFlacSupported = Platform.OS == 'ios' && !!StreamingFlacPlayerModule
 
-export const openStreamingFlac = async(url: string, headers: Record<string, string> = {}, volume = 1, rate = 1) => {
+export const openStreamingFlac = async(url: string, headers: Record<string, string> = {}, volume = 1, rate = 1, autoplay = true) => {
   const open = assertSupported('openStream')
-  return open(url, headers, volume, rate)
+  return open(url, headers, volume, rate, autoplay)
 }
 
 export const resumeStreamingFlac = async() => assertSupported('resume')()

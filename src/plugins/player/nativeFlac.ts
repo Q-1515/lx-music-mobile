@@ -27,7 +27,7 @@ type NativeFlacEvent =
   | { type: 'error', message?: string, state?: NativeFlacState, position?: number, duration?: number }
 
 interface NativeFlacPlayerModule {
-  playFile: (path: string, position: number, volume: number, rate: number) => Promise<{ position: number, duration: number }>
+  playFile: (path: string, position: number, volume: number, rate: number, autoplay?: boolean) => Promise<{ position: number, duration: number }>
   resume: () => Promise<void>
   pause: () => Promise<void>
   stop: () => Promise<void>
@@ -180,9 +180,9 @@ const ensurePlayablePath = async(musicInfo: LX.Player.PlayMusic, url: string, fo
   return task
 }
 
-const playNativeFile = async(path: string, position: number) => {
+const playNativeFile = async(path: string, position: number, autoplay = true) => {
   if (!NativeFlacPlayer) throw new Error('Native flac player is unavailable')
-  return NativeFlacPlayer.playFile(path, position, settingState.setting['player.volume'], settingState.setting['player.playbackRate']).catch((err: Error & { lxHandled?: boolean }) => {
+  return NativeFlacPlayer.playFile(path, position, settingState.setting['player.volume'], settingState.setting['player.playbackRate'], autoplay).catch((err: Error & { lxHandled?: boolean }) => {
     err.lxHandled = true
     throw err
   })
@@ -204,7 +204,7 @@ export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: s
   return !!info.meta._qualitys.flac || !!info.meta._qualitys.flac24bit
 }
 
-export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number) => {
+export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number, autoplay = true) => {
   const nextTrackId = `nativeflac://${getMusicInfo(musicInfo).id}`
 
   if (isRemoteUrl(url) && isStreamingFlacSupported && position <= 0) {
@@ -212,7 +212,8 @@ export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url
     currentMode = 'stream'
     currentState = 'loading'
     try {
-      await openStreamingFlac(url, { 'User-Agent': defaultUserAgent }, settingState.setting['player.volume'], settingState.setting['player.playbackRate'])
+      await openStreamingFlac(url, { 'User-Agent': defaultUserAgent }, settingState.setting['player.volume'], settingState.setting['player.playbackRate'], autoplay)
+      currentState = autoplay ? 'loading' : 'paused'
       return {
         position: 0,
         duration: 0,
@@ -229,20 +230,20 @@ export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url
 
   if (!NativeFlacPlayer) throw new Error('Native flac player is unavailable')
   let path = await ensurePlayablePath(musicInfo, url)
-  currentState = 'loading'
+  currentState = autoplay ? 'loading' : 'paused'
   let info
   try {
-    info = await playNativeFile(path, position)
+    info = await playNativeFile(path, position, autoplay)
   } catch (err) {
     if (isRemoteUrl(url)) {
       await unlink(path).catch(() => {})
       path = await ensurePlayablePath(musicInfo, url, true)
-      info = await playNativeFile(path, position)
+      info = await playNativeFile(path, position, autoplay)
     } else throw err
   }
   currentTrackId = nextTrackId
   currentMode = 'file'
-  currentState = 'playing'
+  currentState = autoplay ? 'playing' : 'paused'
   return {
     ...info,
     path,

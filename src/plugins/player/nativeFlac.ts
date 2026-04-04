@@ -2,6 +2,7 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native'
 import { downloadFile, existsFile, mkdir, temporaryDirectoryPath, unlink } from '@/utils/fs'
 import { stringMd5 } from 'react-native-quick-md5'
 import settingState from '@/store/setting/state'
+import { httpFetch } from '@/utils/request'
 import {
   getStreamingFlacDuration,
   getStreamingFlacPosition,
@@ -20,6 +21,12 @@ import {
 } from '@/utils/nativeModules/streamingFlac'
 
 type NativeFlacState = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'stopped'
+type AudioFormat = 'flac' | 'mp3' | 'm4a' | 'aac' | 'ogg' | 'wav'
+type ProbeAudioFormatResult = AudioFormat | 'non-audio'
+interface ProbeHttpResponse {
+  headers?: Record<string, string>
+  body?: Buffer
+}
 
 type NativeFlacEvent =
   | { type: 'state', state: NativeFlacState, position?: number, duration?: number }
@@ -55,7 +62,10 @@ const eventEmitter = Platform.OS == 'ios' && typeof NativeFlacEventPlayer?.addLi
 
 const cacheDir = `${temporaryDirectoryPath}/NativeFlacPlayer`
 const downloadingMap = new Map<string, Promise<string>>()
+const remoteAudioFormatCache = new Map<string, ProbeAudioFormatResult | null>()
+const remoteAudioFormatTaskMap = new Map<string, Promise<ProbeAudioFormatResult | null>>()
 const preferredPreciseQualities = new Set<LX.Quality>(['flac', 'flac24bit'])
+const knownAudioExts = new Set<AudioFormat>(['flac', 'mp3', 'm4a', 'aac', 'ogg', 'wav'])
 const retryDelay = 800
 const defaultUserAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile'
 
@@ -111,6 +121,116 @@ const getUrlExt = (url: string) => {
   return getContentDispositionExt(url)
 }
 
+const normalizeAudioExt = (ext?: string | null): AudioFormat | null => {
+  if (!ext) return null
+  return knownAudioExts.has(ext as AudioFormat) ? ext as AudioFormat : null
+}
+
+const getHeaderValue = (headers: Record<string, string> | undefined, name: string) => {
+  if (!headers) return null
+  const lowerName = name.toLowerCase()
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() == lowerName) return value
+  }
+  return null
+}
+
+const getContentTypeAudioFormat = (contentType?: string | null): AudioFormat | null => {
+  if (!contentType) return null
+  const value = contentType.toLowerCase()
+  if (value.includes('flac')) return 'flac'
+  if (value.includes('mpeg') || value.includes('mp3')) return 'mp3'
+  if (value.includes('aac')) return 'aac'
+  if (value.includes('ogg')) return 'ogg'
+  if (value.includes('wav') || value.includes('wave')) return 'wav'
+  if (value.includes('mp4') || value.includes('m4a')) return 'm4a'
+  return null
+}
+
+const isNonAudioContentType = (contentType?: string | null) => {
+  if (!contentType) return false
+  const value = contentType.toLowerCase()
+  return value.includes('application/json') || value.includes('text/html') || value.includes('application/xml')
+}
+
+const getBufferAudioFormat = (buffer: Buffer): AudioFormat | null => {
+  if (buffer.length >= 4) {
+    const header = buffer.subarray(0, 4).toString('ascii')
+    if (header == 'fLaC') return 'flac'
+    if (header == 'OggS') return 'ogg'
+    if (header == 'ID3') return 'mp3'
+    if (header == 'RIFF' && buffer.length >= 12 && buffer.subarray(8, 12).toString('ascii') == 'WAVE') return 'wav'
+  }
+  if (buffer.length >= 8 && buffer.subarray(4, 8).toString('ascii') == 'ftyp') return 'm4a'
+  if (buffer.length >= 2) {
+    const byte0 = buffer[0]
+    const byte1 = buffer[1]
+    if (byte0 == 0xFF && (byte1 & 0xF6) == 0xF0) return 'aac'
+    if (byte0 == 0xFF && (byte1 & 0xE0) == 0xE0) return 'mp3'
+  }
+  return null
+}
+
+const isNonAudioBuffer = (buffer: Buffer) => {
+  const text = buffer.subarray(0, 32).toString('utf8').trimStart()
+  return text.startsWith('{') || text.startsWith('[') || text.startsWith('<')
+}
+
+const shouldProbeRemoteAudioFormat = (musicInfo: LX.Player.PlayMusic, quality?: LX.Quality | null) => {
+  const info = getMusicInfo(musicInfo)
+  if (quality != null) return preferredPreciseQualities.has(quality)
+  const playQuality = settingState.setting['player.playQuality']
+  if (!preferredPreciseQualities.has(playQuality)) return false
+  return !!info.meta._qualitys.flac || !!info.meta._qualitys.flac24bit
+}
+
+const probeRemoteAudioFormat = async(url: string): Promise<ProbeAudioFormatResult | null> => {
+  if (!isRemoteUrl(url)) return null
+  if (remoteAudioFormatCache.has(url)) return remoteAudioFormatCache.get(url) ?? null
+
+  let task = remoteAudioFormatTaskMap.get(url)
+  if (!task) {
+    task = (async() => {
+      const headers = { 'User-Agent': defaultUserAgent }
+      const headResp = await httpFetch(url, {
+        method: 'head',
+        timeout: 5000,
+        headers,
+      }).promise.catch(() => null) as ProbeHttpResponse | null
+      const headContentType = getHeaderValue(headResp?.headers, 'content-type')
+      const headFormat = getContentTypeAudioFormat(headContentType)
+      if (headFormat) return headFormat
+      if (isNonAudioContentType(headContentType)) return 'non-audio'
+
+      const rangeResp = await httpFetch(url, {
+        method: 'get',
+        timeout: 8000,
+        binary: true,
+        headers: {
+          ...headers,
+          Range: 'bytes=0-63',
+        },
+      }).promise.catch(() => null) as ProbeHttpResponse | null
+      if (!rangeResp) return null
+
+      const rangeContentType = getHeaderValue(rangeResp.headers, 'content-type')
+      const rangeFormat = getContentTypeAudioFormat(rangeContentType)
+      if (rangeFormat) return rangeFormat
+      if (isNonAudioContentType(rangeContentType)) return 'non-audio'
+      if (!Buffer.isBuffer(rangeResp.body)) return null
+      if (isNonAudioBuffer(rangeResp.body)) return 'non-audio'
+      return getBufferAudioFormat(rangeResp.body)
+    })().finally(() => {
+      remoteAudioFormatTaskMap.delete(url)
+    })
+    remoteAudioFormatTaskMap.set(url, task)
+  }
+
+  const format = await task.catch(() => null)
+  remoteAudioFormatCache.set(url, format)
+  return format
+}
+
 const getActualExtHint = (musicInfo: LX.Player.PlayMusic, url: string) => {
   const info = getMusicInfo(musicInfo)
   if (info.source == 'local') return info.meta.ext?.toLowerCase() ?? null
@@ -120,7 +240,7 @@ const getActualExtHint = (musicInfo: LX.Player.PlayMusic, url: string) => {
 const getQualityExt = (musicInfo: LX.Player.PlayMusic, url: string) => {
   const info = getMusicInfo(musicInfo)
   if (info.source == 'local') return info.meta.ext?.toLowerCase() ?? 'flac'
-  const ext = getUrlExt(url)
+  const ext = remoteAudioFormatCache.get(url) ?? normalizeAudioExt(getUrlExt(url))
   if (ext) return ext
   return preferredPreciseQualities.has(settingState.setting['player.playQuality']) ? 'flac' : 'mp3'
 }
@@ -190,12 +310,17 @@ const playNativeFile = async(path: string, position: number, autoplay = true) =>
 
 export const isNativeFlacPlayerAvailable = () => Platform.OS == 'ios' && (!!NativeFlacPlayer || isStreamingFlacSupported)
 
-export const shouldUseNativeFlacPlayer = (musicInfo: LX.Player.PlayMusic, url: string, quality?: LX.Quality | null) => {
+export const shouldUseNativeFlacPlayer = async(musicInfo: LX.Player.PlayMusic, url: string, quality?: LX.Quality | null) => {
   if (!isNativeFlacPlayerAvailable()) return false
 
   const info = getMusicInfo(musicInfo)
-  const actualExt = getActualExtHint(musicInfo, url)
+  const actualExt = normalizeAudioExt(getActualExtHint(musicInfo, url))
   if (actualExt != null) return actualExt == 'flac'
+  if (shouldProbeRemoteAudioFormat(musicInfo, quality)) {
+    const probedFormat = await probeRemoteAudioFormat(url)
+    if (probedFormat == 'non-audio') return false
+    if (probedFormat != null) return probedFormat == 'flac'
+  }
   if (quality != null) return preferredPreciseQualities.has(quality)
   if (info.source == 'local') return false
 

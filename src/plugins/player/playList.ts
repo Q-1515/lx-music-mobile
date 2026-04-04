@@ -282,7 +282,7 @@ export const initTrackInfo = async(musicInfo: LX.Player.PlayMusic, mInfo: LX.Pla
 const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time: number, quality?: LX.Quality | null) => {
   const currentTrackIndex = await TrackPlayer.getCurrentTrack()
   const shouldAutoStart = resolveShouldAutoStart(currentTrackIndex)
-  if (Platform.OS == 'ios' && shouldUseNativeFlacPlayer(musicInfo, url, quality)) {
+  if (Platform.OS == 'ios' && await shouldUseNativeFlacPlayer(musicInfo, url, quality)) {
     global.lx.playerStatus.ignoreTrackPlayerLifecycle = true
     try {
       await TrackPlayer.reset().catch(async() => {

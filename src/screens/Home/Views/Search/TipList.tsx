@@ -5,6 +5,8 @@ import { createStyle } from '@/utils/tools'
 import Text from '@/components/common/Text'
 import { scaleSizeH } from '@/utils/pixelRatio'
 import musicSdk from '@/utils/musicSdk'
+import { useTheme } from '@/store/theme/hook'
+import { BorderWidths } from '@/theme'
 import searchState, { type InitState as SearchState } from '@/store/search/state'
 import { setSearchText, setTipList, setTipListInfo } from '@/core/search/search'
 import { debounce } from '@/utils'
@@ -34,6 +36,7 @@ export default forwardRef<TipListType, TipListProps>(({ onSearch }, ref) => {
   const [visible, setVisible] = useState(false)
   const visibleListRef = useRef(false)
   const isUnmountedRef = useRef(false)
+  const theme = useTheme()
 
   useEffect(() => {
     isUnmountedRef.current = false
@@ -98,7 +101,14 @@ export default forwardRef<TipListType, TipListProps>(({ onSearch }, ref) => {
 
   const renderItem: SearchTipListProps['renderItem'] = ({ item, index }) => {
     return (
-      <Button style={styles.item} onPress={() => { onSearch(item) }} key={index}>
+      <Button
+        style={{
+          ...styles.item,
+          borderTopColor: theme['c-border-background'],
+          borderTopWidth: index ? BorderWidths.normal2 : 0,
+        }}
+        onPress={() => { onSearch(item) }}
+        key={index}>
         <Text numberOfLines={1}>{item}</Text>
       </Button>
     )
@@ -129,7 +139,6 @@ const styles = createStyle({
     alignItems: 'center',
     paddingLeft: 15,
     paddingRight: 15,
-    // backgroundColor: 'rgba(0, 0, 0, 0.2)',
   },
 })
 

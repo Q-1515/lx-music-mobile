@@ -1,8 +1,9 @@
 import { useRef, useState, useCallback, useMemo, forwardRef, useImperativeHandle, type Ref } from 'react'
-import { StyleSheet, View, Animated } from 'react-native'
+import { StyleSheet, View, Animated, Platform } from 'react-native'
 // import PropTypes from 'prop-types'
 // import { AppColors } from '@/theme'
 import { useTheme } from '@/store/theme/hook'
+import { BorderRadius, BorderWidths } from '@/theme'
 import List, { type ItemT, type ListProps, type ListType } from './List'
 // import InsetShadow from 'react-native-inset-shadow'
 
@@ -109,10 +110,18 @@ const Component = <T extends ItemT<T>>({ onPressBg = noop, ...props }: SearchTip
           { scaleY },
         ],
       }}>
-      <View style={{ ...styles.container, backgroundColor: theme['c-content-background'] }}>
-        <List ref={listRef} {...props} />
+      <View style={styles.content}>
+        <View style={{
+          ...styles.container,
+          backgroundColor: theme['c-content-background'],
+          borderColor: theme['c-border-background'],
+        }}>
+          <List ref={listRef} {...props} />
+        </View>
       </View>
-      <View style={styles.blank} onTouchStart={onPressBg}></View>
+      <View
+        style={{ ...styles.blank, backgroundColor: 'rgba(0, 0, 0, 0.05)' }}
+        onTouchStart={onPressBg}></View>
     </Animated.View>
   ), [onPressBg, props, scaleY, theme, translateY])
 
@@ -131,17 +140,34 @@ const styles = StyleSheet.create({
     width: '100%',
     zIndex: 10,
   },
+  content: {
+    paddingTop: 6,
+    paddingLeft: 8,
+    paddingRight: 8,
+  },
   container: {
     flex: 0,
-    // flexGrow: 0,
-    // borderBottomWidth: BorderWidths.normal,
-    elevation: 2,
+    borderWidth: BorderWidths.normal2,
+    borderRadius: BorderRadius.normal * 2,
+    overflow: 'hidden',
     maxHeight: '80%',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: {
+          width: 0,
+          height: 6,
+        },
+        shadowOpacity: 0.16,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
   },
   blank: {
     flex: 1,
     flexGrow: 1,
-    // backgroundColor: 'transparent',
-    // backgroundColor: 'rgba(0,0,0,0.2)',
   },
 })

@@ -10,6 +10,7 @@ import { View } from 'react-native'
 import { scaleSizeH } from '@/utils/pixelRatio'
 import { getListMusics } from '@/core/list'
 import listState from '@/store/list/state'
+import { BorderWidths } from '@/theme'
 
 type SearchTipListProps = _SearchTipListProps<LX.Music.MusicInfo>
 interface ListMusicSearchProps {
@@ -95,7 +96,14 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
 
   const renderItem = ({ item, index }: { item: LX.Music.MusicInfo, index: number }) => {
     return (
-      <Button style={styles.item} onPress={() => { onScrollToInfo(item) }} key={index}>
+      <Button
+        style={{
+          ...styles.item,
+          borderTopColor: theme['c-border-background'],
+          borderTopWidth: index ? BorderWidths.normal2 : 0,
+        }}
+        onPress={() => { onScrollToInfo(item) }}
+        key={index}>
         <View style={styles.itemName}>
           <Text numberOfLines={1}>{item.name}</Text>
           <Text style={styles.subName} numberOfLines={1} size={12} color={theme['c-font-label']}>{item.singer} ({item.meta.albumName})</Text>
@@ -130,7 +138,6 @@ const styles = createStyle({
     alignItems: 'center',
     paddingLeft: 15,
     paddingRight: 15,
-    // backgroundColor: 'rgba(0, 0, 0, 0.2)',
   },
   itemName: {
     flexGrow: 1,

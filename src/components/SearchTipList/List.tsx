@@ -38,6 +38,7 @@ const List = <T extends ItemT<T>>(props: ListProps<T>, ref: Ref<ListType<T>>) =>
       automaticallyAdjustContentInsets={false}
       contentInsetAdjustmentBehavior={Platform.OS == 'ios' ? 'never' : undefined}
       keyboardShouldPersistTaps={'always'}
+      showsVerticalScrollIndicator={false}
       {...props}
       data={list}
     />

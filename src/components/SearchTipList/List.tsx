@@ -13,6 +13,7 @@ export type ListProps<T> = Pick<FlatListProps<T>,
 | 'keyExtractor'
 | 'getItemLayout'
 | 'keyboardShouldPersistTaps'
+| 'ListEmptyComponent'
 >
 
 export interface ListType<T> {

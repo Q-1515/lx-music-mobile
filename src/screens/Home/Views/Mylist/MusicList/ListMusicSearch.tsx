@@ -11,6 +11,7 @@ import { scaleSizeH } from '@/utils/pixelRatio'
 import { getListMusics } from '@/core/list'
 import listState from '@/store/list/state'
 import { BorderWidths } from '@/theme'
+import { useI18n } from '@/lang'
 
 type SearchTipListProps = _SearchTipListProps<LX.Music.MusicInfo>
 interface ListMusicSearchProps {
@@ -36,6 +37,7 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
   const currentKeywordRef = useRef('')
   const currentSearchIdRef = useRef(0)
   const theme = useTheme()
+  const t = useI18n()
 
   const handleShowList = (keyword: string, height: number) => {
     searchTipListRef.current?.setHeight(height)
@@ -52,7 +54,7 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
       })
     } else {
       currentSearchIdRef.current = searchId
-      searchTipListRef.current?.setList([])
+      searchTipListRef.current?.hide()
     }
   }
 
@@ -70,7 +72,7 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
       currentKeywordRef.current = ''
       currentListIdRef.current = ''
       currentSearchIdRef.current++
-      searchTipListRef.current?.setList([])
+      searchTipListRef.current?.hide()
     },
   }))
 
@@ -130,7 +132,9 @@ export default forwardRef<ListMusicSearchType, ListMusicSearchProps>(({ onScroll
       ? <SearchTipList
           ref={searchTipListRef}
           renderItem={renderItem}
-          onPressBg={() => searchTipListRef.current?.setList([])}
+          onPressBg={() => searchTipListRef.current?.hide()}
+          hideWhenEmpty={false}
+          ListEmptyComponent={<View style={styles.empty}><Text color={theme['c-font-label']}>{t('no_item')}</Text></View>}
           keyExtractor={getkey}
           getItemLayout={getItemLayout}
         />
@@ -157,6 +161,13 @@ const styles = createStyle({
   itemSource: {
     flexGrow: 0,
     flexShrink: 0,
+  },
+  empty: {
+    paddingTop: 15,
+    paddingBottom: 15,
+    paddingLeft: 15,
+    paddingRight: 15,
+    alignItems: 'center',
   },
 })
 

@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react'
-import { Animated, View, TouchableOpacity } from 'react-native'
+import { useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle, useEffect } from 'react'
+import { Animated, View, TouchableOpacity, Platform, type NativeSyntheticEvent, type TextInputSelectionChangeEventData } from 'react-native'
 
 import Text from '@/components/common/Text'
 import Input, { type InputType } from '@/components/common/Input'
@@ -16,15 +16,56 @@ type SearchInputType = InputType
 
 const SearchInput = forwardRef<SearchInputType, SearchInputProps>(({ onSearch }, ref) => {
   const [text, setText] = useState('')
+  const isComposingRef = useRef(false)
+  const pendingTextRef = useRef('')
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const flushSearch = useCallback((text: string) => {
+    pendingTextRef.current = ''
+    onSearch(text.trim())
+  }, [onSearch])
+
+  const queueSearch = useCallback((text: string) => {
+    pendingTextRef.current = text
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+    searchTimeoutRef.current = setTimeout(() => {
+      searchTimeoutRef.current = null
+      if (isComposingRef.current) return
+      flushSearch(text)
+    }, 20)
+  }, [flushSearch])
+
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+    }
+  }, [])
 
   const handleChangeText = (text: string) => {
     setText(text)
-    onSearch(text.trim())
+    if (Platform.OS == 'ios') {
+      queueSearch(text)
+      return
+    }
+    flushSearch(text)
   }
+
+  const handleSelectionChange = useCallback((event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
+    if (Platform.OS != 'ios') return
+    const { start, end } = event.nativeEvent.selection
+    const wasComposing = isComposingRef.current
+    isComposingRef.current = start != end
+    if (wasComposing && !isComposingRef.current && pendingTextRef.current) {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+      searchTimeoutRef.current = null
+      flushSearch(pendingTextRef.current)
+    }
+  }, [flushSearch])
 
   return (
     <Input
       onChangeText={handleChangeText}
+      onSelectionChange={handleSelectionChange}
       placeholder="Search for something..."
       value={text}
       style={styles.input}

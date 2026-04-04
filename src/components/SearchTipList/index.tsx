@@ -9,15 +9,17 @@ import List, { type ItemT, type ListProps, type ListType } from './List'
 
 export interface SearchTipListProps<T> extends ListProps<T> {
   onPressBg?: () => void
+  hideWhenEmpty?: boolean
 }
 export interface SearchTipListType<T> {
   setList: (list: T[]) => void
   setHeight: (height: number) => void
+  hide: () => void
 }
 
 const noop = () => {}
 
-const Component = <T extends ItemT<T>>({ onPressBg = noop, ...props }: SearchTipListProps<T>, ref: Ref<SearchTipListType<T>>) => {
+const Component = <T extends ItemT<T>>({ onPressBg = noop, hideWhenEmpty = true, ...props }: SearchTipListProps<T>, ref: Ref<SearchTipListType<T>>) => {
   const theme = useTheme()
   const translateY = useRef(new Animated.Value(0)).current
   const scaleY = useRef(new Animated.Value(0)).current
@@ -30,8 +32,8 @@ const Component = <T extends ItemT<T>>({ onPressBg = noop, ...props }: SearchTip
   useImperativeHandle(ref, () => ({
     setList(list) {
       if (prevListRef.current.length) {
-        if (!list.length) handleHide()
-      } else if (list.length) handleShow()
+        if (!list.length && hideWhenEmpty) handleHide()
+      } else if ((list.length || !hideWhenEmpty) && !visible) handleShow()
       prevListRef.current = list
       requestAnimationFrame(() => {
         listRef.current?.setList(list)
@@ -39,6 +41,13 @@ const Component = <T extends ItemT<T>>({ onPressBg = noop, ...props }: SearchTip
     },
     setHeight(height) {
       heightRef.current = height
+    },
+    hide() {
+      prevListRef.current = []
+      requestAnimationFrame(() => {
+        listRef.current?.setList([])
+      })
+      handleHide()
     },
   }))
 

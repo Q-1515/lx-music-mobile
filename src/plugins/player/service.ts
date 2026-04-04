@@ -279,19 +279,6 @@ const initNativeFlacEvents = () => {
         global.app_event.playerEmptied()
         break
       case 'error':
-        {
-          const duration = event.duration ?? playerState.progress.maxPlayTime
-          const position = event.position ?? playerState.progress.nowPlayTime
-          const remainTime = duration - position
-          if (duration > 10 && remainTime > 0 && remainTime <= 12) {
-            global.lx.playerTrackId = ''
-            global.app_event.playerPause()
-            global.app_event.pause()
-            global.app_event.playerEnded()
-            global.app_event.playerEmptied()
-            break
-          }
-        }
         console.log('native flac playback-error', event.message)
         global.app_event.error()
         global.app_event.playerError()

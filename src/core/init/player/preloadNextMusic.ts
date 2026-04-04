@@ -3,6 +3,7 @@ import { getNextPlayMusicInfo, resetRandomNextMusicInfo } from '@/core/player/pl
 import { checkUrl } from '@/utils/request'
 import playerState from '@/store/player/state'
 import { isCached } from '@/plugins/player/utils'
+import { isNativeFlacActive } from '@/plugins/player/nativeFlac'
 
 
 const preloadMusicInfo = {
@@ -54,6 +55,7 @@ export default () => {
   }
 
   const handlePlayProgressChanged: typeof global.state_event.playProgressChanged = (progress) => {
+    if (isNativeFlacActive()) return
     const duration = progress.maxPlayTime
     if (duration > 10 && duration - progress.nowPlayTime < 10 && !preloadMusicInfo.info) {
       void preloadNextMusicUrl(progress.nowPlayTime)

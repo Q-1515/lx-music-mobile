@@ -113,7 +113,7 @@ export default forwardRef<ChoosePathType, ChoosePathProps>(({
 
     if (Platform.OS == 'ios') {
       void InteractionManager.runAfterInteractions(() => {
-        setTimeout(run, 120)
+        requestAnimationFrame(run)
       })
     } else {
       run()

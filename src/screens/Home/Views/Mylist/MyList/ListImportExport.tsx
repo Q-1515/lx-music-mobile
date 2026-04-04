@@ -1,7 +1,7 @@
 import ChoosePath, { type ChoosePathType } from '@/components/common/ChoosePath'
 import { LXM_FILE_EXT_RXP } from '@/config/constant'
 import { Platform } from 'react-native'
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useImperativeHandle, useRef } from 'react'
 import { handleExport, handleImport, handleImportMediaFile } from './listAction'
 import { toast } from '@/utils/tools'
 
@@ -29,16 +29,11 @@ export interface ListImportExportType {
 }
 
 export default forwardRef<ListImportExportType, {}>((props, ref) => {
-  const [visible, setVisible] = useState(false)
   const choosePathRef = useRef<ChoosePathType>(null)
   const selectInfoRef = useRef<SelectInfo>((initSelectInfo as SelectInfo))
-  const pendingShowRef = useRef<SelectInfo['action'] | null>(null)
   // console.log('render import export')
 
-  useEffect(() => {
-    if (!visible || !pendingShowRef.current || !choosePathRef.current) return
-    const action = pendingShowRef.current
-    pendingShowRef.current = null
+  const showChoosePath = (action: SelectInfo['action']) => {
     switch (action) {
       case 'import':
         choosePathRef.current.show({
@@ -62,7 +57,7 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
         })
         break
     }
-  }, [visible])
+  }
 
   useImperativeHandle(ref, () => ({
     import(listInfo, index) {
@@ -71,16 +66,7 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
         listInfo,
         index,
       }
-      if (visible) {
-        choosePathRef.current?.show({
-          title: global.i18n.t('list_import_part_desc'),
-          dirOnly: false,
-          filter: LXM_FILE_EXT_RXP,
-        })
-      } else {
-        pendingShowRef.current = 'import'
-        setVisible(true)
-      }
+      showChoosePath('import')
     },
     export(listInfo, index) {
       selectInfoRef.current = {
@@ -92,16 +78,7 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
         handleExport(listInfo)
         return
       }
-      if (visible) {
-        choosePathRef.current?.show({
-          title: global.i18n.t('list_export_part_desc'),
-          dirOnly: true,
-          filter: LXM_FILE_EXT_RXP,
-        })
-      } else {
-        pendingShowRef.current = 'export'
-        setVisible(true)
-      }
+      showChoosePath('export')
     },
     selectFile(listInfo, index) {
       selectInfoRef.current = {
@@ -113,16 +90,7 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
         toast(global.i18n.t('platform_feature_not_supported'), 'long')
         return
       }
-      if (visible) {
-        choosePathRef.current?.show({
-          title: global.i18n.t('list_select_local_file_desc'),
-          dirOnly: true,
-          isPersist: true,
-        })
-      } else {
-        pendingShowRef.current = 'selectFile'
-        setVisible(true)
-      }
+      showChoosePath('selectFile')
     },
   }))
 
@@ -142,8 +110,6 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
   }
 
   return (
-    visible
-      ? <ChoosePath ref={choosePathRef} onConfirm={onConfirmPath} />
-      : null
+    <ChoosePath ref={choosePathRef} onConfirm={onConfirmPath} />
   )
 })

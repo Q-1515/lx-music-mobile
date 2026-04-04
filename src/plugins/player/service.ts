@@ -12,6 +12,7 @@ import { pause, play, playNext, playPrev } from '@/core/player/player'
 import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 import { getNativeFlacTrackId, isNativeFlacActive, onNativeFlacPlayerEvent, setNativeFlacRate, setNativeFlacVolume } from './nativeFlac'
 import playerState from '@/store/player/state'
+import { log } from '@/utils/log'
 
 let isInitialized = false
 let isNativeFlacInitialized = false
@@ -32,6 +33,19 @@ const handleExitApp = async(reason: string) => {
 const shouldIgnoreTrackPlayerLifecycle = () => {
   return Platform.OS == 'ios' && (isNativeFlacActive() || global.lx.playerStatus.ignoreTrackPlayerLifecycle)
 }
+
+const getPlayerLogSnapshot = (extra: Record<string, unknown> = {}) => ({
+  musicId: playerState.musicInfo.id,
+  listId: playerState.playMusicInfo.listId,
+  playerTrackId: global.lx.playerTrackId,
+  nowPlayTime: playerState.progress.nowPlayTime,
+  maxPlayTime: playerState.progress.maxPlayTime,
+  isPlay: playerState.isPlay,
+  gettingUrlId: global.lx.gettingUrlId,
+  nativeFlacActive: isNativeFlacActive(),
+  ignoreLifecycle: global.lx.playerStatus.ignoreTrackPlayerLifecycle,
+  ...extra,
+})
 
 
 const registerPlaybackService = async() => {
@@ -82,6 +96,9 @@ const registerPlaybackService = async() => {
 
   TrackPlayer.addEventListener(TPEvent.PlaybackError, async(err: any) => {
     if (shouldIgnoreTrackPlayerLifecycle()) return
+    log.error('[player.service] track-player playback-error', getPlayerLogSnapshot({
+      error: err,
+    }))
     console.log('playback-error', err)
     global.app_event.error()
     global.app_event.playerError()
@@ -115,10 +132,16 @@ const registerPlaybackService = async() => {
         global.app_event.play()
         break
       case TPState.Buffering:
+        log.warn('[player.service] track-player buffering', getPlayerLogSnapshot({
+          state: 'buffering',
+        }))
         global.app_event.pause()
         global.app_event.playerWaiting()
         break
       case TPState.Connecting:
+        log.warn('[player.service] track-player connecting', getPlayerLogSnapshot({
+          state: 'connecting',
+        }))
         global.app_event.playerLoadstart()
         break
       default:
@@ -246,10 +269,20 @@ const initNativeFlacEvents = () => {
     switch (event.type) {
       case 'state':
         if (event.state == 'loading') {
+          log.warn('[player.service] native flac loading', getPlayerLogSnapshot({
+            eventState: event.state,
+            position: event.position,
+            duration: event.duration,
+          }))
           global.app_event.playerLoadstart()
           break
         }
         if (event.state == 'buffering') {
+          log.warn('[player.service] native flac buffering', getPlayerLogSnapshot({
+            eventState: event.state,
+            position: event.position,
+            duration: event.duration,
+          }))
           global.app_event.pause()
           global.app_event.playerWaiting()
           break
@@ -279,6 +312,12 @@ const initNativeFlacEvents = () => {
         global.app_event.playerEmptied()
         break
       case 'error':
+        log.error('[player.service] native flac playback-error', getPlayerLogSnapshot({
+          eventState: event.state,
+          position: event.position,
+          duration: event.duration,
+          message: event.message,
+        }))
         console.log('native flac playback-error', event.message)
         global.app_event.error()
         global.app_event.playerError()

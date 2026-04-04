@@ -16,6 +16,7 @@ import {
   shouldUseNativeFlacPlayer,
   startNativeFlacPlayback,
 } from './nativeFlac'
+import { log } from '@/utils/log'
 
 
 const list: LX.Player.Track[] = []
@@ -357,11 +358,28 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
 }
 let playPromise = Promise.resolve()
 let actionId = Math.random()
+const sanitizeUrl = (url: string) => /^https?:\/\//i.test(url)
+  ? url.split('?')[0]
+  : url
 export const playMusic = (musicInfo: LX.Player.PlayMusic, url: string, time: number, quality?: LX.Quality | null) => {
   const id = actionId = Math.random()
   void playPromise.finally(() => {
     if (id != actionId) return
     playPromise = handlePlayMusic(musicInfo, url, time, quality).catch((err: Error & { lxHandled?: boolean }) => {
+      const targetMusicInfo = 'progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo
+      log.error('[player.playList] handlePlayMusic failed', {
+        musicId: targetMusicInfo.id,
+        source: targetMusicInfo.source,
+        name: targetMusicInfo.name,
+        singer: targetMusicInfo.singer,
+        time,
+        quality,
+        url: sanitizeUrl(url),
+        isNativeFlacActive: isNativeFlacActive(),
+        message: err.message,
+        stack: err.stack,
+        lxHandled: err.lxHandled,
+      })
       console.log(err)
       if (!err?.lxHandled) {
         global.app_event.error()

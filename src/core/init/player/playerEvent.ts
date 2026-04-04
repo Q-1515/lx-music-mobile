@@ -5,6 +5,7 @@ import { isActive } from '@/utils/tools'
 import BackgroundTimer from 'react-native-background-timer'
 import playerState from '@/store/player/state'
 import { setNowPlayTime } from '@/core/player/progress'
+import { log } from '@/utils/log'
 
 
 export default () => {
@@ -13,6 +14,17 @@ export default () => {
 
   let loadingTimeout: number | null = null
   let delayNextTimeout: number | null = null
+  const getPlayerSnapshot = (extra: Record<string, unknown> = {}) => ({
+    musicId: playerState.musicInfo.id,
+    listId: playerState.playMusicInfo.listId,
+    nowPlayTime: playerState.progress.nowPlayTime,
+    maxPlayTime: playerState.progress.maxPlayTime,
+    isPlay: playerState.isPlay,
+    retryNum,
+    prevTimeoutId,
+    gettingUrlId: global.lx.gettingUrlId,
+    ...extra,
+  })
   const startLoadingTimeout = () => {
     // console.log('start load timeout')
     clearLoadingTimeout()
@@ -24,6 +36,9 @@ export default () => {
       // }
 
       // 如果加载超时，则尝试刷新URL
+      log.warn('[playerEvent] loading timeout fired', getPlayerSnapshot({
+        action: prevTimeoutId == playerState.musicInfo.id ? 'playNext' : 'refreshUrl',
+      }))
       if (prevTimeoutId == playerState.musicInfo.id) {
         prevTimeoutId = null
         void playNext(true)
@@ -91,12 +106,23 @@ export default () => {
     if (!playerState.musicInfo.id) return
     clearLoadingTimeout()
     if (global.lx.isPlayedStop) return
+    log.warn('[playerEvent] playerError received', getPlayerSnapshot())
     if (playerState.playMusicInfo.musicInfo && retryNum < 2) { // 若音频URL无效则尝试刷新2次URL
       let musicInfo = playerState.playMusicInfo.musicInfo
+      let currentPosition = playerState.progress.nowPlayTime
       void getPosition().then((position) => {
-        if (position) setNowPlayTime(position)
+        if (position) {
+          currentPosition = position
+          setNowPlayTime(position)
+        }
+      }).catch(() => {
+        log.warn('[playerEvent] getPosition failed before refresh', getPlayerSnapshot())
       }).finally(() => {
         // console.log(this.retryNum)
+        log.warn('[playerEvent] refreshing current music url after playerError', getPlayerSnapshot({
+          currentPosition,
+          nextRetryNum: retryNum + 1,
+        }))
         if (playerState.playMusicInfo.musicInfo !== musicInfo) return
         retryNum++
         setMusicUrl(playerState.playMusicInfo.musicInfo, true)
@@ -106,6 +132,9 @@ export default () => {
     }
     if (!isEmpty()) void setStop()
 
+    log.warn('[playerEvent] playerError fallback after retries', getPlayerSnapshot({
+      action: isActive() ? 'showErrorAndDelayNext' : 'playNext',
+    }))
     if (isActive()) {
       setStatusText(global.i18n.t('player__error'))
       setTimeout(addDelayNextTimeout)

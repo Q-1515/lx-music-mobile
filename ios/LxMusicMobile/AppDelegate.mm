@@ -1327,6 +1327,18 @@ RCT_EXPORT_MODULE();
   return YES;
 }
 
+- (BOOL)isCurrentStreamSession:(NSURLSession *)session task:(NSURLSessionTask *)task {
+  if (session == nil || session != self.session) return NO;
+  if (task != nil && task != self.task) return NO;
+  return YES;
+}
+
+- (void)waitForDecoderLoopToFinish {
+  dispatch_sync(self.decoderQueue, ^{
+    // Wait until any previously queued decoder work has exited.
+  });
+}
+
 - (void)resetStreamingState {
   self.streamData = [NSMutableData data];
   self.readOffset = 0;
@@ -1668,13 +1680,13 @@ RCT_EXPORT_MODULE();
 - (void)stopStreamingInternal:(BOOL)resetAudio {
   self.stopRequested = YES;
   [self.streamCondition lock];
+  self.downloadCompleted = YES;
   [self.streamCondition broadcast];
   [self.streamCondition unlock];
   [self.task cancel];
   [self.session invalidateAndCancel];
   self.task = nil;
   self.session = nil;
-  self.downloadCompleted = YES;
   if (resetAudio) {
     dispatch_sync(self.renderQueue, ^{
       self.lastKnownPosition = [self currentPlaybackPositionLocked];
@@ -1682,6 +1694,7 @@ RCT_EXPORT_MODULE();
       [self cleanupAudioGraphLocked];
     });
   }
+  [self waitForDecoderLoopToFinish];
 }
 
 - (void)restartDecoderLoopForSeek {
@@ -1856,10 +1869,15 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
 }
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition disposition))completionHandler {
+  if (![self isCurrentStreamSession:session task:dataTask]) {
+    completionHandler(NSURLSessionResponseCancel);
+    return;
+  }
   completionHandler(NSURLSessionResponseAllow);
 }
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
+  if (![self isCurrentStreamSession:session task:dataTask]) return;
   if (self.stopRequested || !data.length) return;
   [self.streamCondition lock];
   [self.streamData appendData:data];
@@ -1868,6 +1886,7 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
 }
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+  if (![self isCurrentStreamSession:session task:task]) return;
   [self.streamCondition lock];
   if (error != nil && error.code != NSURLErrorCancelled) {
     self.streamError = error;

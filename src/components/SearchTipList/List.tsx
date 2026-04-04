@@ -1,5 +1,5 @@
 import { useState, useRef, useImperativeHandle, forwardRef, type Ref } from 'react'
-import { FlatList, Platform, type FlatListProps } from 'react-native'
+import { FlatList, Platform, StyleSheet, type FlatListProps } from 'react-native'
 
 // import InsetShadow from 'react-native-inset-shadow'
 
@@ -38,6 +38,7 @@ const List = <T extends ItemT<T>>(props: ListProps<T>, ref: Ref<ListType<T>>) =>
       removeClippedSubviews={false}
       automaticallyAdjustContentInsets={false}
       contentInsetAdjustmentBehavior={Platform.OS == 'ios' ? 'never' : undefined}
+      contentContainerStyle={styles.content}
       keyboardShouldPersistTaps={'always'}
       showsVerticalScrollIndicator={false}
       {...props}
@@ -48,5 +49,12 @@ const List = <T extends ItemT<T>>(props: ListProps<T>, ref: Ref<ListType<T>>) =>
 
 export default forwardRef(List) as
   <M,>(p: ListProps<M> & { ref?: Ref<ListType<M>> }) => JSX.Element | null
+
+const styles = StyleSheet.create({
+  content: {
+    paddingTop: 2,
+    paddingBottom: 6,
+  },
+})
 
 

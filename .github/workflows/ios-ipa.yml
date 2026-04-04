@@ -4,7 +4,12 @@ on:
   push:
     branches:
       - ios-adaptation
+    tags:
+      - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-ios-ipa:
@@ -91,6 +96,20 @@ jobs:
         with:
           name: ios-ipa-v${{ env.PACKAGE_VERSION }}-unsigned
           path: build/lx-music-mobile-v${{ env.PACKAGE_VERSION }}-ios-unsigned.ipa
+
+      - name: Release unsigned IPA
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.PACKAGE_VERSION }}
+          prerelease: false
+          draft: false
+          files: build/lx-music-mobile-v${{ env.PACKAGE_VERSION }}-ios-unsigned.ipa
+          body: |
+            iOS unsigned IPA for v${{ env.PACKAGE_VERSION }}.
+
+            File:
+            - `lx-music-mobile-v${{ env.PACKAGE_VERSION }}-ios-unsigned.ipa`
 
       - name: Install signing certificate
         if: ${{ env.IOS_P12_BASE64 != '' && env.IOS_P12_PASSWORD != '' && env.IOS_MOBILEPROVISION_BASE64 != '' && env.IOS_TEAM_ID != '' }}

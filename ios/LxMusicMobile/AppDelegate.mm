@@ -1462,12 +1462,12 @@ RCT_EXPORT_MODULE();
     self.engine = [[AVAudioEngine alloc] init];
     self.playerNode = [[AVAudioPlayerNode alloc] init];
     self.timePitchNode = [[AVAudioUnitTimePitch alloc] init];
-    self.timePitchNode.rate = self.currentRate;
     [self.engine attachNode:self.playerNode];
     [self.engine attachNode:self.timePitchNode];
     [self.engine connect:self.playerNode to:self.timePitchNode format:self.outputFormat];
     [self.engine connect:self.timePitchNode to:self.engine.mainMixerNode format:self.outputFormat];
     self.playerNode.volume = self.currentVolume;
+    self.timePitchNode.rate = self.currentRate;
     [self.engine prepare];
 
     NSError *error = nil;

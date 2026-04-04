@@ -1817,6 +1817,19 @@ RCT_EXPORT_MODULE();
   }
 }
 
+- (void)restartDecoderLoopForQuickSeek {
+  self.stopRequested = YES;
+  [self.streamCondition lock];
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+  dispatch_sync(self.decoderQueue, ^{});
+  self.stopRequested = NO;
+  self.streamError = nil;
+  self.currentByteOffset = 0;
+  self.downloadCompleted = self.fullStreamData != nil;
+  [self startDecoderLoop];
+}
+
 RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDictionary *)headers volume:(nonnull NSNumber *)volume rate:(nonnull NSNumber *)rate autoplay:(nonnull NSNumber *)autoplay resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (![urlString isKindOfClass:[NSString class]] || urlString.length == 0) {
@@ -1909,16 +1922,10 @@ RCT_REMAP_METHOD(seekTo, seekToStream:(nonnull NSNumber *)position resolver:(RCT
   double requestedPosition = MAX([position doubleValue], 0);
   if (self.duration > 0) requestedPosition = LXClampDouble(requestedPosition, 0, self.duration);
   __block double currentPosition = 0;
-  __block double queuedSeconds = 0;
   dispatch_sync(self.renderQueue, ^{
     currentPosition = [self currentPlaybackPositionLocked];
-    queuedSeconds = self.sampleRate > 0 ? (double)self.queuedFrames / self.sampleRate : 0;
   });
-  BOOL canUseFastForwardSeek =
-    self.decoder != NULL &&
-    requestedPosition > currentPosition &&
-    (requestedPosition - currentPosition) <= 20 &&
-    (requestedPosition - currentPosition) >= MAX(queuedSeconds - 0.15, 0);
+  BOOL shouldRestartDecoder = self.decoder == NULL || requestedPosition < currentPosition;
 
   dispatch_sync(self.renderQueue, ^{
     self.lastKnownPosition = requestedPosition;
@@ -1931,16 +1938,20 @@ RCT_REMAP_METHOD(seekTo, seekToStream:(nonnull NSNumber *)position resolver:(RCT
   });
 
   self.pendingSeekPosition = requestedPosition;
-  self.seekRequested = !canUseFastForwardSeek;
+  self.seekRequested = NO;
   self.seekInProgress = self.sampleRate > 0 && requestedPosition > 0;
-  self.fastForwardSeekActive = canUseFastForwardSeek;
+  self.fastForwardSeekActive = YES;
   self.startThresholdSeconds = self.seekStartThresholdSeconds;
   self.currentState = self.manualPause ? @"paused" : @"buffering";
-  if (canUseFastForwardSeek) self.seekTargetFrame = self.sampleRate > 0 ? (int64_t)llround(requestedPosition * self.sampleRate) : 0;
+  self.seekTargetFrame = self.sampleRate > 0 ? (int64_t)llround(requestedPosition * self.sampleRate) : 0;
 
-  [self.streamCondition lock];
-  [self.streamCondition broadcast];
-  [self.streamCondition unlock];
+  if (shouldRestartDecoder) {
+    [self restartDecoderLoopForQuickSeek];
+  } else {
+    [self.streamCondition lock];
+    [self.streamCondition broadcast];
+    [self.streamCondition unlock];
+  }
 
   [self emitState:self.currentState position:@(requestedPosition) duration:@(self.duration)];
   resolve(@(requestedPosition));

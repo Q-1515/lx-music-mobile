@@ -10,7 +10,7 @@ import { exitApp } from '@/core/common'
 import { getCurrentTrackId, updateMetaData } from './playList'
 import { pause, play, playNext, playPrev } from '@/core/player/player'
 import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
-import { getNativeFlacTrackId, isNativeFlacActive, onNativeFlacPlayerEvent } from './nativeFlac'
+import { getNativeFlacTrackId, isNativeFlacActive, onNativeFlacPlayerEvent, setNativeFlacRate, setNativeFlacVolume } from './nativeFlac'
 import playerState from '@/store/player/state'
 
 let isInitialized = false
@@ -256,6 +256,8 @@ const initNativeFlacEvents = () => {
         }
         if (event.state == 'playing') {
           global.lx.playerTrackId = getNativeFlacTrackId()
+          void setNativeFlacVolume(settingState.setting['player.volume'])
+          void setNativeFlacRate(settingState.setting['player.playbackRate'])
           global.app_event.playerPlaying()
           global.app_event.play()
           if (playerState.musicInfo.id) {

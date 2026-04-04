@@ -842,6 +842,8 @@ static NSArray<NSString *> *LXDocumentTypesForExtensions(id extTypes) {
 @property (nonatomic, assign) BOOL hasListeners;
 @property (nonatomic, assign) BOOL manualPause;
 @property (nonatomic, assign) BOOL interruptedBySystem;
+@property (nonatomic, assign) float currentVolume;
+@property (nonatomic, assign) float currentRate;
 @end
 
 @implementation FlacPlayerModule
@@ -856,6 +858,8 @@ RCT_EXPORT_MODULE();
   self = [super init];
   if (self != nil) {
     _currentState = @"idle";
+    _currentVolume = 1.0f;
+    _currentRate = 1.0f;
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(handleAudioSessionInterruption:)
                                                  name:AVAudioSessionInterruptionNotification
@@ -982,6 +986,9 @@ RCT_EXPORT_MODULE();
         [self emitErrorMessage:sessionError.localizedDescription ?: @"Failed to reactivate audio session"];
         return;
       }
+      self.player.volume = self.currentVolume;
+      self.player.enableRate = YES;
+      self.player.rate = MAX(self.currentRate, 0.5f);
       if ([self.player play]) {
         [self emitState:@"playing" position:nil duration:nil];
       } else {
@@ -1011,8 +1018,10 @@ RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNum
       return;
     }
 
-    self.player.volume = [volume floatValue];
-    self.player.rate = MAX([rate floatValue], 0.5f);
+    self.currentVolume = [volume floatValue];
+    self.currentRate = MAX([rate floatValue], 0.5f);
+    self.player.volume = self.currentVolume;
+    self.player.rate = self.currentRate;
     self.player.currentTime = LXClampDouble([position doubleValue], 0, self.player.duration);
     BOOL shouldAutoplay = autoplay == nil ? YES : [autoplay boolValue];
     self.manualPause = !shouldAutoplay;
@@ -1051,6 +1060,9 @@ RCT_REMAP_METHOD(resume, resumeWithResolver:(RCTPromiseResolveBlock)resolve reje
       reject(@"flac_player_resume", sessionError.localizedDescription ?: @"Failed to activate audio session", sessionError);
       return;
     }
+    self.player.volume = self.currentVolume;
+    self.player.enableRate = YES;
+    self.player.rate = MAX(self.currentRate, 0.5f);
 
     if (![self.player play]) {
       NSError *error = LXError(@"flac_player_resume", @"Failed to resume flac playback");
@@ -1112,16 +1124,18 @@ RCT_REMAP_METHOD(seekTo, seekTo:(nonnull NSNumber *)position resolver:(RCTPromis
 
 RCT_REMAP_METHOD(setVolume, setVolume:(nonnull NSNumber *)volume resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
-    if (self.player != nil) self.player.volume = [volume floatValue];
+    self.currentVolume = [volume floatValue];
+    if (self.player != nil) self.player.volume = self.currentVolume;
     resolve(nil);
   });
 }
 
 RCT_REMAP_METHOD(setRate, setRate:(nonnull NSNumber *)rate resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
+    self.currentRate = MAX([rate floatValue], 0.5f);
     if (self.player != nil) {
       self.player.enableRate = YES;
-      self.player.rate = MAX([rate floatValue], 0.5f);
+      self.player.rate = self.currentRate;
       if (self.player.isPlaying) [self.player play];
     }
     resolve(nil);
@@ -1382,6 +1396,8 @@ RCT_EXPORT_MODULE();
         if (self.engine != nil && !self.engine.isRunning) {
           if (![self.engine startAndReturnError:&engineError]) return;
         }
+        if (self.playerNode != nil) self.playerNode.volume = self.currentVolume;
+        if (self.timePitchNode != nil) self.timePitchNode.rate = self.currentRate;
         self.manualPause = NO;
         [self maybeStartPlaybackLocked];
         didResumePlaying = self.playbackStarted;

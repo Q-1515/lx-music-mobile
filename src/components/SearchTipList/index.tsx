@@ -119,6 +119,9 @@ const Component = <T extends ItemT<T>>({ onPressBg = noop, hideWhenEmpty = true,
           { scaleY },
         ],
       }}>
+      <View
+        style={styles.mask}
+        onTouchStart={onPressBg}></View>
       <View style={styles.content}>
         <View style={{
           ...styles.container,
@@ -128,9 +131,6 @@ const Component = <T extends ItemT<T>>({ onPressBg = noop, hideWhenEmpty = true,
           <List ref={listRef} {...props} />
         </View>
       </View>
-      <View
-        style={{ ...styles.blank, backgroundColor: 'rgba(0, 0, 0, 0.05)' }}
-        onTouchStart={onPressBg}></View>
     </Animated.View>
   ), [onPressBg, props, scaleY, theme, translateY])
 
@@ -150,9 +150,14 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   content: {
+    zIndex: 1,
     paddingTop: 6,
     paddingLeft: 8,
     paddingRight: 8,
+  },
+  mask: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
   },
   container: {
     flex: 0,
@@ -174,9 +179,5 @@ const styles = StyleSheet.create({
         elevation: 6,
       },
     }),
-  },
-  blank: {
-    flex: 1,
-    flexGrow: 1,
   },
 })

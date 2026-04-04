@@ -17,7 +17,7 @@ type SearchTipListProps = _SearchTipListProps<LX.Music.MusicInfo>
 interface ListMusicSearchProps {
   onScrollToInfo: (info: LX.Music.MusicInfo) => void
 }
-export const ITEM_HEIGHT = scaleSizeH(46)
+export const ITEM_HEIGHT = scaleSizeH(56)
 
 export interface ListMusicSearchType {
   search: (keyword: string, height: number) => void

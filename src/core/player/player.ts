@@ -29,7 +29,6 @@ import { LIST_IDS } from '@/config/constant'
 import { addListMusics, removeListMusics } from '@/core/list'
 import { addDislikeInfo } from '@/core/dislikeList'
 import { markTimeoutExitInteraction } from './timeoutExit'
-import { log } from '@/utils/log'
 
 // import { checkMusicFileAvailable } from '@renderer/utils/music'
 
@@ -65,25 +64,6 @@ const createGettingUrlId = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   const tInfo = 'progress' in musicInfo ? musicInfo.metadata.musicInfo.meta.toggleMusicInfo : musicInfo.meta.toggleMusicInfo
   return `${musicInfo.id}_${tInfo?.id ?? ''}`
 }
-
-const getMusicLogSnapshot = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem, extra: Record<string, unknown> = {}) => {
-  const targetMusicInfo = 'progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo
-  return {
-    musicId: targetMusicInfo.id,
-    source: targetMusicInfo.source,
-    name: targetMusicInfo.name,
-    singer: targetMusicInfo.singer,
-    listId: playerState.playMusicInfo.listId,
-    nowPlayTime: playerState.progress.nowPlayTime,
-    maxPlayTime: playerState.progress.maxPlayTime,
-    gettingUrlId: global.lx.gettingUrlId,
-    ...extra,
-  }
-}
-
-const sanitizeUrl = (url: string) => /^https?:\/\//i.test(url)
-  ? url.split('?')[0]
-  : url
 
 interface PlayUrlInfo {
   url: string
@@ -123,12 +103,6 @@ const getMusicPlayUrl = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListIt
   // this.musicInfo.url = await getMusicPlayUrl(targetSong, type)
   setStatusText(global.i18n.t('player__getting_url'))
   addLoadTimeout()
-  if (isRefresh || isRetryed) {
-    log.warn('[player] getMusicPlayUrl request', getMusicLogSnapshot(musicInfo, {
-      isRefresh,
-      isRetryed,
-    }))
-  }
 
   // const type = getPlayType(settingState.setting['player.isPlayHighQuality'], musicInfo)
   let toggleMusicInfo = ('progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo).meta.toggleMusicInfo
@@ -149,23 +123,9 @@ const getMusicPlayUrl = async(musicInfo: LX.Music.MusicInfo | LX.Download.ListIt
   }).then(url => {
     if (global.lx.isPlayedStop || diffCurrentMusicInfo(musicInfo)) return null
 
-    if (isRefresh) {
-      log.warn('[player] getMusicPlayUrl refresh success', getMusicLogSnapshot(musicInfo, {
-        quality: url.quality,
-        url: sanitizeUrl(url.url),
-      }))
-    }
-
     return url
   }).catch(async err => {
     // console.log('err', err.message)
-    log.warn('[player] getMusicPlayUrl failed', getMusicLogSnapshot(musicInfo, {
-      isRefresh,
-      isRetryed,
-      message: err.message,
-      isPlayedStop: global.lx.isPlayedStop,
-      isCurrentChanged: diffCurrentMusicInfo(musicInfo),
-    }))
     if (global.lx.isPlayedStop ||
       diffCurrentMusicInfo(musicInfo) ||
       err.message == requestMsg.cancelRequest) return null
@@ -183,32 +143,14 @@ export const setMusicUrl = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   if (!diffCurrentMusicInfo(musicInfo)) return
   if (cancelDelayRetry) cancelDelayRetry()
   global.lx.gettingUrlId = createGettingUrlId(musicInfo)
-  if (isRefresh) {
-    log.warn('[player] setMusicUrl refresh start', getMusicLogSnapshot(musicInfo, {
-      isRefresh,
-    }))
-  }
   const currentTimePromise = isRefresh
     ? getPosition().catch(() => playerState.progress.nowPlayTime)
     : Promise.resolve(playerState.progress.nowPlayTime)
   void getMusicPlayUrl(musicInfo, isRefresh).then(async(result) => {
     if (!result) return
     const currentTime = await currentTimePromise
-    if (isRefresh) {
-      log.warn('[player] setMusicUrl refresh resolved', getMusicLogSnapshot(musicInfo, {
-        isRefresh,
-        currentTime,
-        quality: result.quality,
-        url: sanitizeUrl(result.url),
-      }))
-    }
     setResource(musicInfo, result.url, currentTime, result.quality)
   }).catch((err: any) => {
-    log.error('[player] setMusicUrl failed', getMusicLogSnapshot(musicInfo, {
-      isRefresh,
-      message: err.message,
-      stack: err.stack,
-    }))
     console.log(err)
     setStatusText(err.message as string)
     global.app_event.error()

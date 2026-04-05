@@ -1214,6 +1214,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) double sampleRate;
 @property (nonatomic, assign) NSUInteger channels;
 @property (nonatomic, assign) NSUInteger bitsPerSample;
+@property (nonatomic, assign) int64_t totalSamples;
 @property (nonatomic, assign) double startThresholdSeconds;
 @property (nonatomic, assign) double maxBufferSeconds;
 @property (nonatomic, assign) double pausedBufferSeconds;
@@ -1364,6 +1365,7 @@ RCT_EXPORT_MODULE();
   self.sampleRate = 0;
   self.channels = 0;
   self.bitsPerSample = 0;
+  self.totalSamples = 0;
   self.lastKnownPosition = 0;
   self.pendingSeekPosition = 0;
   self.queuedFrames = 0;
@@ -1666,6 +1668,10 @@ RCT_EXPORT_MODULE();
         break;
       }
       [self waitForBufferCapacityIfNeeded];
+      if (self.totalSamples > 0 && self.decodedFramesCursor >= self.totalSamples) {
+        [self finishStreamDownloadIfNeeded];
+        break;
+      }
       if (FLAC__stream_decoder_get_state(self.decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) {
         self.downloadCompleted = YES;
         break;
@@ -1707,6 +1713,19 @@ RCT_EXPORT_MODULE();
     });
   }
   [self waitForDecoderLoopToFinish];
+}
+
+- (void)finishStreamDownloadIfNeeded {
+  NSURLSessionDataTask *task = self.task;
+  NSURLSession *session = self.session;
+  self.task = nil;
+  self.session = nil;
+  self.downloadCompleted = YES;
+  [self.streamCondition lock];
+  [self.streamCondition broadcast];
+  [self.streamCondition unlock];
+  if (task != nil) [task cancel];
+  if (session != nil) [session invalidateAndCancel];
 }
 
 - (void)restartDecoderLoopForSeek {
@@ -1942,6 +1961,7 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
   self.sampleRate = streamInfo->sample_rate;
   self.channels = streamInfo->channels;
   self.bitsPerSample = streamInfo->bits_per_sample;
+  self.totalSamples = (int64_t)streamInfo->total_samples;
   self.duration = streamInfo->total_samples > 0 && streamInfo->sample_rate > 0
     ? (double)streamInfo->total_samples / streamInfo->sample_rate
     : 0;
@@ -1977,6 +1997,7 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
     self.lastKnownPosition = [self currentPlaybackPositionLocked];
   });
   if (status == FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC) {
+    if (self.totalSamples > 0 && self.decodedFramesCursor >= self.totalSamples) return;
     [self emitWarningMessage:[NSString stringWithFormat:@"FLAC decoder warning: %@ (%d)", statusName, status]
                         code:@(status)
                   statusName:statusName];

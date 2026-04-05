@@ -322,6 +322,16 @@ const initNativeFlacEvents = () => {
         global.app_event.error()
         global.app_event.playerError()
         break
+      case 'warning':
+        log.warn('[player.service] native flac warning', getPlayerLogSnapshot({
+          eventState: event.state,
+          position: event.position,
+          duration: event.duration,
+          message: event.message,
+          code: event.code,
+          statusName: event.statusName,
+        }))
+        break
     }
   })
   isNativeFlacInitialized = true

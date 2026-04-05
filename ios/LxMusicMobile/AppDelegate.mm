@@ -1239,6 +1239,7 @@ static FLAC__StreamDecoderReadStatus LXStreamingFlacReadCallback(const FLAC__Str
 static FLAC__StreamDecoderWriteStatus LXStreamingFlacWriteCallback(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 * const buffer[], void *client_data);
 static void LXStreamingFlacMetadataCallback(const FLAC__StreamDecoder *decoder, const FLAC__StreamMetadata *metadata, void *client_data);
 static void LXStreamingFlacErrorCallback(const FLAC__StreamDecoder *decoder, FLAC__StreamDecoderErrorStatus status, void *client_data);
+static NSString *LXStreamingFlacDecoderErrorStatusName(FLAC__StreamDecoderErrorStatus status);
 #endif
 
 @implementation StreamingFlacPlayerModule
@@ -1310,6 +1311,17 @@ RCT_EXPORT_MODULE();
     @"position": @(self.lastKnownPosition),
     @"duration": @(self.duration),
   }];
+}
+
+- (void)emitWarningMessage:(NSString *)message code:(NSNumber *)code statusName:(NSString *)statusName {
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"message"] = message ?: @"Unknown streaming flac warning";
+  payload[@"state"] = self.currentState ?: @"idle";
+  payload[@"position"] = @(self.lastKnownPosition);
+  payload[@"duration"] = @(self.duration);
+  if (code != nil) payload[@"code"] = code;
+  if (statusName.length) payload[@"statusName"] = statusName;
+  [self emitEventWithType:@"warning" body:payload];
 }
 
 - (BOOL)prepareAudioSession:(NSError **)error {
@@ -1960,7 +1972,17 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
 
 - (void)handleDecoderErrorStatus:(FLAC__StreamDecoderErrorStatus)status {
   if (self.stopRequested) return;
-  self.streamError = LXError(@"streaming_flac_decode", [NSString stringWithFormat:@"FLAC decoder error: %d", status]);
+  NSString *statusName = LXStreamingFlacDecoderErrorStatusName(status);
+  dispatch_sync(self.renderQueue, ^{
+    self.lastKnownPosition = [self currentPlaybackPositionLocked];
+  });
+  if (status == FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC) {
+    [self emitWarningMessage:[NSString stringWithFormat:@"FLAC decoder warning: %@ (%d)", statusName, status]
+                        code:@(status)
+                  statusName:statusName];
+    return;
+  }
+  self.streamError = LXError(@"streaming_flac_decode", [NSString stringWithFormat:@"FLAC decoder error: %@ (%d)", statusName, status]);
   [self emitErrorMessage:self.streamError.localizedDescription];
   [self.streamCondition lock];
   [self.streamCondition broadcast];
@@ -1986,6 +2008,14 @@ static void LXStreamingFlacMetadataCallback(const FLAC__StreamDecoder *decoder, 
 
 static void LXStreamingFlacErrorCallback(const FLAC__StreamDecoder *decoder, FLAC__StreamDecoderErrorStatus status, void *client_data) {
   [(__bridge StreamingFlacPlayerModule *)client_data handleDecoderErrorStatus:status];
+}
+
+static NSString *LXStreamingFlacDecoderErrorStatusName(FLAC__StreamDecoderErrorStatus status) {
+  if (status >= 0 && status <= FLAC__STREAM_DECODER_ERROR_STATUS_MISSING_FRAME) {
+    const char *name = FLAC__StreamDecoderErrorStatusString[status];
+    if (name != NULL) return [NSString stringWithUTF8String:name];
+  }
+  return [NSString stringWithFormat:@"UNKNOWN_%d", status];
 }
 #endif
 

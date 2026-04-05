@@ -24,6 +24,7 @@ type NativeFlacState = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' |
 type NativeFlacEvent =
   | { type: 'state', state: NativeFlacState, position?: number, duration?: number }
   | { type: 'ended', state?: NativeFlacState, position?: number, duration?: number, success?: boolean }
+  | { type: 'warning', message?: string, state?: NativeFlacState, position?: number, duration?: number, code?: number, statusName?: string }
   | { type: 'error', message?: string, state?: NativeFlacState, position?: number, duration?: number }
 
 interface NativeFlacPlayerModule {
@@ -362,6 +363,17 @@ export const onNativeFlacPlayerEvent = (listener: (event: NativeFlacEvent) => vo
           state: 'paused',
           position: event.position,
           duration: event.duration,
+        })
+        break
+      case 'warning':
+        listener({
+          type: 'warning',
+          message: event.message,
+          state: event.state,
+          position: event.position,
+          duration: event.duration,
+          code: event.code,
+          statusName: event.statusName,
         })
         break
     }

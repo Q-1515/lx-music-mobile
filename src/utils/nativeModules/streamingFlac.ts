@@ -17,6 +17,16 @@ export interface StreamingFlacErrorEvent {
   duration?: number
 }
 
+export interface StreamingFlacWarningEvent {
+  type: 'warning'
+  message?: string
+  state?: StreamingFlacState
+  position?: number
+  duration?: number
+  code?: number
+  statusName?: string
+}
+
 export interface StreamingFlacEndedEvent {
   type: 'ended'
   state?: StreamingFlacState
@@ -27,6 +37,7 @@ export interface StreamingFlacEndedEvent {
 export type StreamingFlacEvent =
   | StreamingFlacStateEvent
   | StreamingFlacErrorEvent
+  | StreamingFlacWarningEvent
   | StreamingFlacEndedEvent
 
 interface NativeStreamingFlacModule {

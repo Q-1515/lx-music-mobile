@@ -1419,11 +1419,7 @@ RCT_EXPORT_MODULE();
       __block BOOL didResumePlaying = NO;
       __block BOOL shouldEmitBuffering = NO;
       dispatch_sync(self.renderQueue, ^{
-        if (self.engine != nil && !self.engine.isRunning) {
-          if (![self.engine startAndReturnError:&engineError]) return;
-        }
-        if (self.playerNode != nil) self.playerNode.volume = self.currentVolume;
-        if (self.timePitchNode != nil) self.timePitchNode.rate = self.currentRate;
+        if (![self ensureAudioEngineRunningLocked:&engineError]) return;
         self.manualPause = NO;
         [self maybeStartPlaybackLocked];
         didResumePlaying = self.playbackStarted;
@@ -1507,8 +1503,18 @@ RCT_EXPORT_MODULE();
   }
 }
 
+- (BOOL)ensureAudioEngineRunningLocked:(NSError **)error {
+  if (self.engine != nil && !self.engine.isRunning) {
+    if (![self.engine startAndReturnError:error]) return NO;
+  }
+  if (self.playerNode != nil) self.playerNode.volume = self.currentVolume;
+  if (self.timePitchNode != nil) self.timePitchNode.rate = self.currentRate;
+  return YES;
+}
+
 - (void)maybeStartPlaybackLocked {
   if (self.manualPause || self.playerNode == nil || self.sampleRate <= 0) return;
+  if (self.engine == nil || !self.engine.isRunning) return;
   double queuedSeconds = (double)self.queuedFrames / self.sampleRate;
   if (!self.playbackStarted && (queuedSeconds >= self.startThresholdSeconds || (self.downloadCompleted && self.queuedFrames > 0))) {
     [self.playerNode play];
@@ -1793,12 +1799,36 @@ RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDiction
 }
 
 RCT_REMAP_METHOD(resume, resumeStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
-  dispatch_sync(self.renderQueue, ^{
-    self.manualPause = NO;
-    self.interruptedBySystem = NO;
-    [self maybeStartPlaybackLocked];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSError *sessionError = nil;
+    if (![self prepareAudioSession:&sessionError]) {
+      [self emitErrorMessage:sessionError.localizedDescription ?: @"Failed to activate audio session"];
+      reject(@"streaming_flac_resume", sessionError.localizedDescription ?: @"Failed to activate audio session", sessionError);
+      return;
+    }
+
+    __block NSError *engineError = nil;
+    __block BOOL shouldEmitBuffering = NO;
+    dispatch_sync(self.renderQueue, ^{
+      if (![self ensureAudioEngineRunningLocked:&engineError]) return;
+      self.manualPause = NO;
+      self.interruptedBySystem = NO;
+      [self maybeStartPlaybackLocked];
+      shouldEmitBuffering = !self.playbackStarted;
+      if (shouldEmitBuffering) self.currentState = @"buffering";
+    });
+
+    if (engineError != nil) {
+      [self emitErrorMessage:engineError.localizedDescription ?: @"Failed to restart audio engine before resuming playback"];
+      reject(@"streaming_flac_resume", engineError.localizedDescription ?: @"Failed to restart audio engine before resuming playback", engineError);
+      return;
+    }
+
+    if (shouldEmitBuffering) {
+      [self emitState:@"buffering" position:@(self.lastKnownPosition) duration:@(self.duration)];
+    }
+    resolve(nil);
   });
-  resolve(nil);
 }
 
 RCT_REMAP_METHOD(pause, pauseStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {

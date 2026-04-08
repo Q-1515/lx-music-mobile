@@ -216,9 +216,11 @@ export const pauseNativeFlacPlayback = async() => {
 export const resumeNativeFlacPlayback = async() => {
   if (!currentTrackId) return
   if (currentMode == 'stream') {
-    await resumeStreamingFlac().catch(() => {})
+    await resumeStreamingFlac()
   } else if (NativeFlacPlayer) {
     await NativeFlacPlayer.resume()
+  } else {
+    return
   }
   currentState = 'playing'
 }

@@ -2776,7 +2776,8 @@ RCT_REMAP_METHOD(clearNowPlayingInfo, clearNowPlayingInfoWithResolver:(RCTPromis
 
 @end
 
-@interface UtilsModule : NSObject<RCTBridgeModule>
+@interface UtilsModule : RCTEventEmitter<RCTBridgeModule>
+@property (nonatomic, assign) BOOL hasListeners;
 @end
 
 @implementation UtilsModule
@@ -2787,12 +2788,61 @@ RCT_EXPORT_MODULE();
   return YES;
 }
 
-RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {
-  (void)eventName;
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleAudioRouteChange:)
+                                                 name:AVAudioSessionRouteChangeNotification
+                                               object:[AVAudioSession sharedInstance]];
+  }
+  return self;
 }
 
-RCT_EXPORT_METHOD(removeListeners:(double)count) {
-  (void)count;
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (NSArray<NSString *> *)supportedEvents {
+  return @[ @"headphones-disconnected", @"screen-state", @"screen-size-changed" ];
+}
+
+- (void)startObserving {
+  self.hasListeners = YES;
+}
+
+- (void)stopObserving {
+  self.hasListeners = NO;
+}
+
+- (BOOL)shouldEmitHeadphonesDisconnectedForPreviousRoute:(AVAudioSessionRouteDescription *)route {
+  for (AVAudioSessionPortDescription *output in route.outputs) {
+    NSString *portType = output.portType;
+    if ([portType isEqualToString:AVAudioSessionPortHeadphones] ||
+        [portType isEqualToString:AVAudioSessionPortBluetoothA2DP] ||
+        [portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+        [portType isEqualToString:AVAudioSessionPortBluetoothLE]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+- (void)handleAudioRouteChange:(NSNotification *)notification {
+  if (!self.hasListeners) return;
+
+  NSDictionary *userInfo = notification.userInfo;
+  if (userInfo == nil) return;
+
+  NSNumber *reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey];
+  if (reasonValue == nil || [reasonValue unsignedIntegerValue] != AVAudioSessionRouteChangeReasonOldDeviceUnavailable) return;
+
+  AVAudioSessionRouteDescription *previousRoute = userInfo[AVAudioSessionRouteChangePreviousRouteKey];
+  if (previousRoute == nil || ![self shouldEmitHeadphonesDisconnectedForPreviousRoute:previousRoute]) return;
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self sendEventWithName:@"headphones-disconnected" body:nil];
+  });
 }
 
 RCT_EXPORT_METHOD(exitApp) {

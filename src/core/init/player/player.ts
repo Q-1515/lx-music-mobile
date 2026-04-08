@@ -6,6 +6,8 @@ import { setStop } from '@/plugins/player'
 import { delayUpdateMusicInfo, updateMetaData } from '@/plugins/player/playList'
 import playerState from '@/store/player/state'
 import settingState from '@/store/setting/state'
+import { onHeadphonesDisconnected } from '@/utils/nativeModules/utils'
+import { Platform } from 'react-native'
 
 
 export default async(setting: LX.AppSetting) => {
@@ -67,4 +69,11 @@ export default async(setting: LX.AppSetting) => {
   global.app_event.on('musicToggled', refreshNowPlaying)
   global.app_event.on('lyricUpdated', refreshNowPlaying)
   global.state_event.on('configUpdated', handleConfigUpdated)
+
+  if (Platform.OS == 'ios') {
+    onHeadphonesDisconnected(() => {
+      if (!playerState.isPlay) return
+      void pause()
+    })
+  }
 }

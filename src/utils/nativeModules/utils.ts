@@ -2,9 +2,14 @@ import { AppState, Dimensions, NativeEventEmitter, NativeModules, Platform, Shar
 
 const { SettingsManager, UtilsModule } = NativeModules
 
+interface UtilsEventModule {
+  addListener: (eventName: string) => void
+  removeListeners: (count: number) => void
+}
+
 const unsupportedError = (feature: string) => new Error(`${feature} is not supported on ${Platform.OS}`)
 const createEmitter = () => UtilsModule && typeof UtilsModule.addListener == 'function' && typeof UtilsModule.removeListeners == 'function'
-  ? new NativeEventEmitter(UtilsModule)
+  ? new NativeEventEmitter(UtilsModule as UtilsEventModule)
   : null
 
 export const exitApp = () => {
@@ -97,10 +102,10 @@ export const shareFile = async(shareTitle: string, filePath: string): Promise<vo
 export const getSystemLocales = async(): Promise<string> => {
   if (typeof UtilsModule?.getSystemLocales == 'function') return UtilsModule.getSystemLocales()
 
-  const locale = SettingsManager?.settings?.AppleLocale
-    || SettingsManager?.settings?.AppleLanguages?.[0]
-    || Intl.DateTimeFormat().resolvedOptions().locale
-    || ''
+  const locale = SettingsManager?.settings?.AppleLocale ||
+    SettingsManager?.settings?.AppleLanguages?.[0] ||
+    Intl.DateTimeFormat().resolvedOptions().locale ||
+    ''
   return typeof locale == 'string'
     ? locale.replace(/-/g, '_').toLowerCase()
     : ''
@@ -112,6 +117,18 @@ export const onScreenStateChange = (handler: (state: 'ON' | 'OFF') => void): () 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   const eventListener = eventEmitter.addListener('screen-state', event => {
     handler(event.state as 'ON' | 'OFF')
+  })
+
+  return () => {
+    eventListener.remove()
+  }
+}
+
+export const onHeadphonesDisconnected = (handler: () => void): () => void => {
+  const eventEmitter = createEmitter()
+  if (!eventEmitter) return () => {}
+  const eventListener = eventEmitter.addListener('headphones-disconnected', () => {
+    handler()
   })
 
   return () => {

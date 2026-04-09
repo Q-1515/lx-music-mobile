@@ -1,6 +1,7 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native'
 import { downloadFile, existsFile, mkdir, temporaryDirectoryPath, unlink } from '@/utils/fs'
 import { stringMd5 } from 'react-native-quick-md5'
+import { checkUrl } from '@/utils/request'
 import settingState from '@/store/setting/state'
 import {
   getStreamingFlacDuration,
@@ -154,6 +155,19 @@ export const shouldUseNativeFlacPlayer = async(musicInfo: LX.Player.PlayMusic, _
   const info = getMusicInfo(musicInfo)
   if (quality != null) return preferredPreciseQualities.has(quality)
   return info.source == 'local' ? info.meta.ext?.toLowerCase() == 'flac' : false
+}
+
+export const prefetchNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, quality?: LX.Quality | null) => {
+  if (!await shouldUseNativeFlacPlayer(musicInfo, url, quality)) return false
+  if (!isRemoteUrl(url)) return true
+
+  if (isStreamingFlacSupported) {
+    await checkUrl(url)
+    return true
+  }
+
+  await ensurePlayablePath(musicInfo, url)
+  return true
 }
 
 export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number, autoplay = true) => {

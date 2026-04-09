@@ -520,7 +520,7 @@ static void LXSyncRemoteCommandAvailability(void) {
       break;
   }
 
-  commandCenter.togglePlayPauseCommand.enabled = YES;
+  commandCenter.togglePlayPauseCommand.enabled = NO;
 }
 
 static void LXApplyNowPlayingInfo(void) {

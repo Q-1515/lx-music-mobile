@@ -34,6 +34,7 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
   // console.log('render import export')
 
   const showChoosePath = (action: SelectInfo['action']) => {
+    if (!choosePathRef.current) return
     switch (action) {
       case 'import':
         choosePathRef.current.show({

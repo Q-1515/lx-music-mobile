@@ -29,7 +29,7 @@ const createInfo = (tools: TimeoutToolsSnapshot): TimeoutExitInfo => ({
 
 const timeoutTools = {
   bgTimeout: null as number | null,
-  timeout: null as NodeJS.Timer | null,
+  timeout: null as ReturnType<typeof setInterval> | null,
   startTime: 0,
   time: -1,
   mode: 'off' as TimeoutMode,

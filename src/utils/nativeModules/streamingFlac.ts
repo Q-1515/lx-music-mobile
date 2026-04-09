@@ -56,9 +56,15 @@ interface NativeStreamingFlacModule {
   removeListeners?: (count: number) => void
 }
 
+interface NativeStreamingFlacEventModule {
+  addListener: (eventName: string) => void
+  removeListeners: (count: number) => void
+}
+
 const StreamingFlacPlayerModule = NativeModules.StreamingFlacPlayerModule as NativeStreamingFlacModule | undefined
-const emitter = Platform.OS == 'ios' && typeof StreamingFlacPlayerModule?.addListener == 'function' && typeof StreamingFlacPlayerModule?.removeListeners == 'function'
-  ? new NativeEventEmitter(StreamingFlacPlayerModule)
+const StreamingFlacEventModule = NativeModules.StreamingFlacPlayerModule as NativeStreamingFlacEventModule | undefined
+const emitter = Platform.OS == 'ios' && typeof StreamingFlacEventModule?.addListener == 'function' && typeof StreamingFlacEventModule?.removeListeners == 'function'
+  ? new NativeEventEmitter(StreamingFlacEventModule)
   : null
 
 const assertSupported = <K extends keyof NativeStreamingFlacModule>(method: K) => {

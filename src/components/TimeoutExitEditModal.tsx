@@ -96,7 +96,13 @@ const Setting = () => {
 }
 
 export const useTimeInfo = () => {
-  const [exitTimeInfo, setExitTimeInfo] = useState({
+  const [exitTimeInfo, setExitTimeInfo] = useState<{
+    cancelText: string
+    confirmText: string
+    isPlayedStop: boolean
+    active: boolean
+    mode: 'off' | 'timer'
+  }>({
     cancelText: '',
     confirmText: '',
     isPlayedStop: false,

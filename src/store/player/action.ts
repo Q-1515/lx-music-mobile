@@ -88,15 +88,19 @@ export default {
     global.state_event.playPlayedListChanged({ ...state.playedList })
   },
   addTempPlayList(list: LX.Player.TempPlayListItem[]) {
-    const topList: Array<{ listId: string | null, musicInfo: LX.Music.MusicInfo | LX.Download.ListItem }> = []
+    const topList: LX.Player.PlayMusicInfo[] = []
     const bottomList = list.filter(({ isTop, ...musicInfo }) => {
       if (isTop) {
-        topList.push(musicInfo)
+        topList.push({
+          musicInfo: musicInfo.musicInfo,
+          listId: musicInfo.listId,
+          isTempPlay: true,
+        })
         return false
       }
       return true
     })
-    if (topList.length) arrUnshift(state.tempPlayList, topList.map(({ musicInfo, listId }) => ({ musicInfo, listId, isTempPlay: true })))
+    if (topList.length) arrUnshift(state.tempPlayList, topList)
     if (bottomList.length) arrPush(state.tempPlayList, bottomList.map(({ musicInfo, listId }) => ({ musicInfo, listId, isTempPlay: true })))
 
     global.state_event.playTempPlayListChanged({ ...state.tempPlayList })

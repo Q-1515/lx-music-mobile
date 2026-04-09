@@ -5,7 +5,7 @@ const durationDriftTolerance = 1.5
 
 const isOnlineMusic = (musicInfo: LX.Player.PlayMusic | null | undefined) => {
   if (!musicInfo) return false
-  return 'progress' in musicInfo ? musicInfo.metadata.musicInfo.source != 'local' : musicInfo.source != 'local'
+  return 'progress' in musicInfo ? true : musicInfo.source != 'local'
 }
 
 const getMusicInterval = (musicInfo: LX.Player.PlayMusic | null | undefined) => {

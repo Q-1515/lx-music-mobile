@@ -488,6 +488,7 @@ static NSMutableDictionary *LXNowPlayingInfoCache = nil;
 static NSString *LXNowPlayingArtworkPath = nil;
 static NSUInteger LXNowPlayingArtworkRequestId = 0;
 static MPNowPlayingPlaybackState LXNowPlayingState = MPNowPlayingPlaybackStateStopped;
+static BOOL LXIsReceivingRemoteControlEvents = NO;
 static NSString * const LXTrackPlayerLifecycleNotificationName = @"LXTrackPlayerLifecycle";
 static id LXTrackPlayerLifecycleObserver = nil;
 
@@ -529,6 +530,22 @@ static void LXApplyNowPlayingInfo(void) {
     center.playbackState = LXNowPlayingState;
   }
   LXSyncRemoteCommandAvailability();
+}
+
+static void LXBeginReceivingRemoteControlEvents(void) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (LXIsReceivingRemoteControlEvents) return;
+    [UIApplication.sharedApplication beginReceivingRemoteControlEvents];
+    LXIsReceivingRemoteControlEvents = YES;
+  });
+}
+
+static void LXEndReceivingRemoteControlEvents(void) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (!LXIsReceivingRemoteControlEvents) return;
+    [UIApplication.sharedApplication endReceivingRemoteControlEvents];
+    LXIsReceivingRemoteControlEvents = NO;
+  });
 }
 
 static void LXCancelNowPlayingArtworkTask(void) {
@@ -1019,6 +1036,7 @@ RCT_REMAP_METHOD(playFile, playFile:(NSString *)filePath position:(nonnull NSNum
     BOOL shouldAutoplay = autoplay == nil ? YES : [autoplay boolValue];
     self.manualPause = !shouldAutoplay;
     self.interruptedBySystem = NO;
+    LXBeginReceivingRemoteControlEvents();
 
     if (shouldAutoplay) {
       if (![self.player play]) {
@@ -1097,6 +1115,7 @@ RCT_REMAP_METHOD(stop, stopWithResolver:(RCTPromiseResolveBlock)resolve rejecter
 RCT_REMAP_METHOD(reset, resetWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
     [self teardownPlayer];
+    LXEndReceivingRemoteControlEvents();
     [self emitState:@"idle" position:@0 duration:@0];
     resolve(nil);
   });
@@ -1763,6 +1782,7 @@ RCT_REMAP_METHOD(openStream, openStream:(NSString *)urlString headers:(NSDiction
     BOOL shouldAutoplay = autoplay == nil ? YES : [autoplay boolValue];
     self.manualPause = !shouldAutoplay;
     self.interruptedBySystem = NO;
+    LXBeginReceivingRemoteControlEvents();
     [self emitState:(shouldAutoplay ? @"loading" : @"paused") position:@0 duration:@0];
 
     NSURL *url = [NSURL URLWithString:urlString];
@@ -1848,6 +1868,7 @@ RCT_REMAP_METHOD(stop, stopStreamWithResolver:(RCTPromiseResolveBlock)resolve re
 RCT_REMAP_METHOD(reset, resetStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   [self stopStreamingInternal:YES];
   [self resetStreamingState];
+  LXEndReceivingRemoteControlEvents();
   self.currentState = @"idle";
   [self emitState:@"idle" position:@0 duration:@0];
   resolve(nil);

@@ -1,4 +1,4 @@
-import TrackPlayer, { State } from 'react-native-track-player'
+import TrackPlayer from 'react-native-track-player'
 import BackgroundTimer from 'react-native-background-timer'
 import { defaultUrl } from '@/config'
 import { NativeModules, Platform } from 'react-native'
@@ -9,7 +9,6 @@ import { updateNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
 import {
   getNativeFlacDuration,
   getNativeFlacPosition,
-  getNativeFlacState,
   getNativeFlacTrackId,
   isNativeFlacActive,
   resetNativeFlacPlayback,
@@ -246,26 +245,28 @@ const resolveShouldAutoStart = (currentTrackIndex: number | null) => {
 }
 
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
+  const prevIsPlaying = state.isPlaying
+  state.isPlaying = isPlay
   if (force) {
     const duration = await getTrackDuration()
     state.prevDuration = duration
-    delayUpdateMusicInfo(musicInfo, lyric)
+    delayUpdateMusicInfo(musicInfo, lyric, isPlay)
     return
   }
-  if (!force && isPlay == state.isPlaying) {
+  if (!force && isPlay == prevIsPlaying) {
     const duration = await getTrackDuration()
     if (state.prevDuration != duration) {
       state.prevDuration = duration
       const trackInfo = await getCurrentTrack()
       if (trackInfo && musicInfo) {
-        delayUpdateMusicInfo(musicInfo, lyric)
+        delayUpdateMusicInfo(musicInfo, lyric, isPlay)
       }
     }
   } else {
     const [duration, trackInfo] = await Promise.all([getTrackDuration(), getCurrentTrack()])
     state.prevDuration = duration
     if (trackInfo && musicInfo) {
-      delayUpdateMusicInfo(musicInfo, lyric)
+      delayUpdateMusicInfo(musicInfo, lyric, isPlay)
     }
   }
 }
@@ -374,7 +375,7 @@ export const playMusic = (musicInfo: LX.Player.PlayMusic, url: string, time: num
 // let musicId = null
 // let duration = 0
 let prevArtwork: string | undefined
-const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
+const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string, isPlaying = state.isPlaying) => {
   console.log('updateMetaInfo', lyric)
   const isShowNotificationImage = settingState.setting['player.isShowNotificationImage']
   // const mInfo = formatMusicInfo(musicInfo)
@@ -389,9 +390,7 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
   //   duration = global.playInfo.duration || 0
   // }
   // console.log('+++++updateMetaInfo+++++', mInfo.name)
-  state.isPlaying = Platform.OS == 'ios' && isNativeFlacActive()
-    ? await getNativeFlacState().then((state) => state == 'playing')
-    : await TrackPlayer.getState() == State.Playing
+  state.isPlaying = isPlaying
   let artwork = isShowNotificationImage ? mInfo.pic ?? prevArtwork : undefined
   if (mInfo.pic) prevArtwork = mInfo.pic
   let name: string
@@ -419,7 +418,7 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
     elapsedTime: isNativeFlacActive()
       ? await getNativeFlacPosition().catch(() => 0)
       : await getAccuratePosition().catch(() => 0),
-    playbackRate: state.isPlaying ? settingState.setting['player.playbackRate'] : 0,
+    playbackRate: isPlaying ? settingState.setting['player.playbackRate'] : 0,
   }
   await updateCurrentTrackMetadata(metadata)
 }
@@ -429,13 +428,14 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string) => {
 const debounceUpdateMetaInfoTools = {
   updateMetaPromise: Promise.resolve(),
   musicInfo: null as LX.Player.MusicInfo | null,
-  debounce(fn: (musicInfo: LX.Player.MusicInfo, lyric?: string) => void | Promise<void>) {
+  debounce(fn: (musicInfo: LX.Player.MusicInfo, lyric?: string, isPlaying?: boolean) => void | Promise<void>) {
     // let delayTimer = null
     let isDelayRun = false
     let timer: number | null = null
     let _musicInfo: LX.Player.MusicInfo | null = null
     let _lyric: string | undefined
-    return (musicInfo: LX.Player.MusicInfo, lyric?: string) => {
+    let _isPlaying: boolean | undefined
+    return (musicInfo: LX.Player.MusicInfo, lyric?: string, isPlaying?: boolean) => {
       // console.log('debounceUpdateMetaInfoTools', musicInfo)
       if (timer) {
         BackgroundTimer.clearTimeout(timer)
@@ -448,19 +448,22 @@ const debounceUpdateMetaInfoTools = {
       if (isDelayRun) {
         _musicInfo = musicInfo
         _lyric = lyric
+        _isPlaying = isPlaying
         timer = BackgroundTimer.setTimeout(() => {
           timer = null
           let musicInfo = _musicInfo
           let lyric = _lyric
+          let isPlaying = _isPlaying
           _musicInfo = null
           _lyric = undefined
+          _isPlaying = undefined
           if (!musicInfo) return
           // isDelayRun = false
-          void fn(musicInfo, lyric)
+          void fn(musicInfo, lyric, isPlaying)
         }, 500)
       } else {
         isDelayRun = true
-        void fn(musicInfo, lyric)
+        void fn(musicInfo, lyric, isPlaying)
         BackgroundTimer.setTimeout(() => {
           // delayTimer = null
           isDelayRun = false
@@ -469,12 +472,12 @@ const debounceUpdateMetaInfoTools = {
     }
   },
   init() {
-    return this.debounce(async(musicInfo: LX.Player.MusicInfo, lyric?: string) => {
+    return this.debounce(async(musicInfo: LX.Player.MusicInfo, lyric?: string, isPlaying?: boolean) => {
       this.musicInfo = musicInfo
       return this.updateMetaPromise.then(() => {
         // console.log('run')
         if (this.musicInfo?.id === musicInfo.id) {
-          this.updateMetaPromise = updateMetaInfo(musicInfo, lyric)
+          this.updateMetaPromise = updateMetaInfo(musicInfo, lyric, isPlaying)
         }
       })
     })

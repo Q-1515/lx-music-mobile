@@ -160,15 +160,20 @@ export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url
   await resetNativeFlacPlayback().catch(() => {})
   const nextTrackId = `nativeflac://${getMusicInfo(musicInfo).id}`
 
-  if (isRemoteUrl(url) && isStreamingFlacSupported && position <= 0) {
+  if (isRemoteUrl(url) && isStreamingFlacSupported) {
     currentTrackId = nextTrackId
     currentMode = 'stream'
     currentState = 'loading'
     try {
       await openStreamingFlac(url, { 'User-Agent': defaultUserAgent }, settingState.setting['player.volume'], settingState.setting['player.playbackRate'], autoplay)
-      currentState = autoplay ? 'loading' : 'paused'
+      const seekPosition = position > 0
+        ? await seekStreamingFlac(position).catch(() => position)
+        : 0
+      currentState = autoplay
+        ? (seekPosition > 0 ? 'buffering' : 'loading')
+        : 'paused'
       return {
-        position: 0,
+        position: seekPosition,
         duration: 0,
         path: url,
         trackId: nextTrackId,

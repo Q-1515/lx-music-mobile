@@ -630,9 +630,7 @@ static void LXClearNowPlayingInfo(void) {
 static void LXHandleTrackPlayerLifecycleNotification(NSNotification *notification) {
   NSDictionary *userInfo = [notification.userInfo isKindOfClass:[NSDictionary class]] ? notification.userInfo : @{};
   NSString *event = [userInfo[@"event"] isKindOfClass:[NSString class]] ? userInfo[@"event"] : @"";
-  NSString *state = [userInfo[@"state"] isKindOfClass:[NSString class]] ? userInfo[@"state"] : @"";
   NSNumber *position = [userInfo[@"position"] isKindOfClass:[NSNumber class]] ? userInfo[@"position"] : nil;
-  NSNumber *rate = [userInfo[@"rate"] isKindOfClass:[NSNumber class]] ? userInfo[@"rate"] : nil;
 
   if ([event isEqualToString:@"destroy"] || [event isEqualToString:@"reset"]) {
     LXClearNowPlayingInfo();
@@ -647,47 +645,6 @@ static void LXHandleTrackPlayerLifecycleNotification(NSNotification *notificatio
       @"playbackRate": LXCurrentNowPlayingRate(),
     });
     return;
-  }
-
-  if ([event isEqualToString:@"error"]) {
-    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePaused, @{
-      @"elapsedTime": position ?: @0,
-      @"playbackRate": @0,
-    });
-    return;
-  }
-
-  if ([event isEqualToString:@"stop"]) {
-    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStateStopped, @{
-      @"elapsedTime": @0,
-      @"playbackRate": @0,
-    });
-    return;
-  }
-
-  if (![event isEqualToString:@"state"]) return;
-
-  if ([state isEqualToString:@"playing"]) {
-    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePlaying, @{
-      @"elapsedTime": position ?: @0,
-      @"playbackRate": rate ?: LXCurrentNowPlayingRate(),
-    });
-    return;
-  }
-
-  if ([state isEqualToString:@"paused"] || [state isEqualToString:@"ready"] || [state isEqualToString:@"loading"]) {
-    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePaused, @{
-      @"elapsedTime": position ?: @0,
-      @"playbackRate": @0,
-    });
-    return;
-  }
-
-  if ([state isEqualToString:@"idle"]) {
-    LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStateStopped, @{
-      @"elapsedTime": @0,
-      @"playbackRate": @0,
-    });
   }
 }
 
@@ -714,16 +671,7 @@ static void LXSetNowPlayingInfo(NSDictionary *metadata) {
   if (album != nil) info[MPMediaItemPropertyAlbumTitle] = album;
   if (duration != nil) info[MPMediaItemPropertyPlaybackDuration] = duration;
   if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
-  if (playbackRate != nil) {
-    info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate;
-    if (playbackRate.doubleValue > 0) {
-      LXNowPlayingState = MPNowPlayingPlaybackStatePlaying;
-    } else if (LXNowPlayingState != MPNowPlayingPlaybackStateStopped) {
-      LXNowPlayingState = MPNowPlayingPlaybackStatePaused;
-    }
-  } else {
-    info[MPNowPlayingInfoPropertyPlaybackRate] = info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
-  }
+  info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
 
   LXApplyNowPlayingInfo();
   LXSetNowPlayingArtwork(artworkPath);

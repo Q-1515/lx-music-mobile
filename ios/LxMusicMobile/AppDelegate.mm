@@ -680,7 +680,9 @@ static void LXSetNowPlayingInfo(NSDictionary *metadata) {
   NSNumber *duration = [metadata[@"duration"] isKindOfClass:[NSNumber class]] ? metadata[@"duration"] : nil;
   NSNumber *elapsedTime = [metadata[@"elapsedTime"] isKindOfClass:[NSNumber class]] ? metadata[@"elapsedTime"] : nil;
   NSNumber *playbackRate = [metadata[@"playbackRate"] isKindOfClass:[NSNumber class]] ? metadata[@"playbackRate"] : nil;
-  NSString *artworkPath = [metadata[@"artwork"] isKindOfClass:[NSString class]] ? metadata[@"artwork"] : @"";
+  id artworkValue = metadata[@"artwork"];
+  BOOL hasArtworkValue = artworkValue != nil && artworkValue != [NSNull null];
+  NSString *artworkPath = [artworkValue isKindOfClass:[NSString class]] ? artworkValue : nil;
 
   if (title != nil) info[MPMediaItemPropertyTitle] = title;
   if (artist != nil) info[MPMediaItemPropertyArtist] = artist;
@@ -699,7 +701,7 @@ static void LXSetNowPlayingInfo(NSDictionary *metadata) {
   }
 
   LXApplyNowPlayingInfo();
-  LXSetNowPlayingArtwork(artworkPath);
+  if (hasArtworkValue) LXSetNowPlayingArtwork(artworkPath ?: @"");
 }
 
 static UIViewController *LXTopViewController(void) {

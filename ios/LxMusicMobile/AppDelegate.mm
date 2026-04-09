@@ -496,12 +496,39 @@ static NSMutableDictionary *LXNowPlayingMutableInfo(void) {
   return LXNowPlayingInfoCache;
 }
 
+static void LXSyncRemoteCommandAvailability(void) {
+  MPRemoteCommandCenter *commandCenter = [MPRemoteCommandCenter sharedCommandCenter];
+  BOOL hasInfo = LXNowPlayingInfoCache.count > 0;
+  if (!hasInfo) {
+    commandCenter.playCommand.enabled = NO;
+    commandCenter.pauseCommand.enabled = NO;
+    commandCenter.togglePlayPauseCommand.enabled = NO;
+    return;
+  }
+
+  switch (LXNowPlayingState) {
+    case MPNowPlayingPlaybackStatePlaying:
+      commandCenter.playCommand.enabled = NO;
+      commandCenter.pauseCommand.enabled = YES;
+      break;
+    case MPNowPlayingPlaybackStatePaused:
+    case MPNowPlayingPlaybackStateStopped:
+    default:
+      commandCenter.playCommand.enabled = YES;
+      commandCenter.pauseCommand.enabled = NO;
+      break;
+  }
+
+  commandCenter.togglePlayPauseCommand.enabled = NO;
+}
+
 static void LXApplyNowPlayingInfo(void) {
   MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
   center.nowPlayingInfo = LXNowPlayingInfoCache.count ? [LXNowPlayingInfoCache copy] : nil;
   if (@available(iOS 13.0, *)) {
     center.playbackState = LXNowPlayingState;
   }
+  LXSyncRemoteCommandAvailability();
 }
 
 static void LXCancelNowPlayingArtworkTask(void) {

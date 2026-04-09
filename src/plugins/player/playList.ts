@@ -307,7 +307,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
       global.lx.playerStatus.ignoreTrackPlayerLifecycle = false
     }
   }
-  if (Platform.OS == 'ios' && isNativeFlacActive()) {
+  if (Platform.OS == 'ios') {
     await resetNativeFlacPlayback().catch(() => {})
   }
   // console.log(tracks, time)

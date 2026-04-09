@@ -157,6 +157,7 @@ export const shouldUseNativeFlacPlayer = async(musicInfo: LX.Player.PlayMusic, _
 }
 
 export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number, autoplay = true) => {
+  await resetNativeFlacPlayback().catch(() => {})
   const nextTrackId = `nativeflac://${getMusicInfo(musicInfo).id}`
 
   if (isRemoteUrl(url) && isStreamingFlacSupported && position <= 0) {
@@ -241,12 +242,12 @@ export const stopNativeFlacPlayback = async(reset = false) => {
 
 export const resetNativeFlacPlayback = async() => {
   const mode = currentMode
-  if (currentMode == 'stream') {
-    await resetStreamingFlac().catch(() => {})
-  } else if (NativeFlacPlayer) {
-    await NativeFlacPlayer.reset()
-  }
-  if (currentMode == mode) clearCurrentContext('idle')
+  const trackId = currentTrackId
+
+  if (NativeFlacPlayer) await NativeFlacPlayer.reset().catch(() => {})
+  if (isStreamingFlacSupported) await resetStreamingFlac().catch(() => {})
+
+  if (currentMode == mode && currentTrackId == trackId) clearCurrentContext('idle')
 }
 
 export const seekNativeFlacPlayback = async(position: number) => {

@@ -186,11 +186,12 @@ const updateCurrentTrackMetadata = async(metadata: {
     await TrackPlayer.updateMetadataForTrack(currentTrackIndex, metadata).catch(() => {})
   }
   if (Platform.OS == 'ios') {
-    await updateNowPlayingInfo({
+    const nowPlayingMetadata: Parameters<typeof updateNowPlayingInfo>[0] = {
       ...metadata,
       artwork: metadata.artwork ?? '',
-      playbackRate: metadata.playbackRate ?? (state.isPlaying ? settingState.setting['player.playbackRate'] : 0),
-    }).catch(() => {})
+    }
+    if (metadata.playbackRate !== undefined) nowPlayingMetadata.playbackRate = metadata.playbackRate
+    await updateNowPlayingInfo(nowPlayingMetadata).catch(() => {})
   } else {
     await TrackPlayer.updateNowPlayingMetadata(metadata, state.isPlaying).catch(() => {})
   }
@@ -233,7 +234,6 @@ export const restoreTrack = async(track: LX.Player.Track, position: number, isPl
     artwork: typeof restoredTrack.artwork == 'string' ? restoredTrack.artwork : undefined,
     duration: restoredTrack.duration,
     elapsedTime: position,
-    playbackRate: isPlaying ? settingState.setting['player.playbackRate'] : 0,
   })
 }
 
@@ -301,7 +301,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
           : (typeof musicInfo.meta.picUrl == 'string' ? musicInfo.meta.picUrl : undefined),
         duration: playbackInfo.duration,
         elapsedTime: playbackInfo.position,
-        playbackRate: shouldAutoStart ? settingState.setting['player.playbackRate'] : 0,
       })
       return
     } finally {
@@ -314,7 +313,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
   // console.log(tracks, time)
   const tracks = buildTracks(musicInfo, url)
   const track = tracks[0]
-  let isPlaying = false
   // await updateMusicInfo(track)
   await TrackPlayer.add(tracks).then(() => list.push(...tracks))
   const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
@@ -329,7 +327,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
       } else {
         await TrackPlayer.play()
         await applyCurrentVolume()
-        isPlaying = true
       }
     }
   } else {
@@ -338,7 +335,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
       await seekToTime(time)
       await TrackPlayer.play()
       await applyCurrentVolume()
-      isPlaying = true
     }
   }
 
@@ -353,7 +349,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
     artwork: typeof track.artwork == 'string' ? track.artwork : undefined,
     duration: track.duration,
     elapsedTime: time,
-    playbackRate: isPlaying ? settingState.setting['player.playbackRate'] : 0,
   })
 }
 let playPromise = Promise.resolve()
@@ -418,7 +413,6 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string, isPlayi
     elapsedTime: isNativeFlacActive()
       ? await getNativeFlacPosition().catch(() => 0)
       : await getAccuratePosition().catch(() => 0),
-    playbackRate: isPlaying ? settingState.setting['player.playbackRate'] : 0,
   }
   await updateCurrentTrackMetadata(metadata)
 }

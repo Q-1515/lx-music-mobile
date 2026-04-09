@@ -38,6 +38,14 @@ export default () => {
       playbackRate: 0,
     }).catch(() => {})
   }
+  const syncPlaybackRate = () => {
+    if (!playerState.playMusicInfo.musicInfo) return
+    if (playerState.isPlay) {
+      void syncNowPlayingState('play')
+    } else if (!playerState.isPlay && buttons.play) {
+      void syncNowPlayingState('pause')
+    }
+  }
   // const updateCollectStatus = async() => {
   //   // let status = !!playMusicInfo.musicInfo && await checkListExistMusic(LIST_ID_LOVE, playerState.playMusicInfo.musicInfo.id)
   //   // if (buttons.collect == status) return false
@@ -81,6 +89,10 @@ export default () => {
     if (!playerState.playMusicInfo.musicInfo) return
     void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric, true)
   }
+  const handleConfigUpdated: typeof global.state_event.configUpdated = (keys) => {
+    if (!keys.includes('player.playbackRate')) return
+    syncPlaybackRate()
+  }
   // const handleSetTaskbarThumbnailClip = (clip) => {
   //   setTaskbarThumbnailClip(clip)
   // }
@@ -99,6 +111,7 @@ export default () => {
   global.app_event.on('error', handlePause)
   global.app_event.on('stop', handleStop)
   global.app_event.on('musicToggled', handleSetPlayInfo)
+  global.state_event.on('configUpdated', handleConfigUpdated)
   // window.app_event.on(eventTaskbarNames.setTaskbarThumbnailClip, handleSetTaskbarThumbnailClip)
   // window.app_event.on('myListMusicUpdate', throttleListChange)
 

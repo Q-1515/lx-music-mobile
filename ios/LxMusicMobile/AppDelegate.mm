@@ -688,16 +688,7 @@ static void LXSetNowPlayingInfo(NSDictionary *metadata) {
   if (album != nil) info[MPMediaItemPropertyAlbumTitle] = album;
   if (duration != nil) info[MPMediaItemPropertyPlaybackDuration] = duration;
   if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
-  if (playbackRate != nil) {
-    info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate;
-    if (playbackRate.doubleValue > 0) {
-      LXNowPlayingState = MPNowPlayingPlaybackStatePlaying;
-    } else if (LXNowPlayingState != MPNowPlayingPlaybackStateStopped) {
-      LXNowPlayingState = MPNowPlayingPlaybackStatePaused;
-    }
-  } else {
-    info[MPNowPlayingInfoPropertyPlaybackRate] = info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
-  }
+  info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
 
   LXApplyNowPlayingInfo();
   LXSetNowPlayingArtwork(artworkPath);
@@ -1231,6 +1222,7 @@ RCT_REMAP_METHOD(getState, getStateWithResolver:(RCTPromiseResolveBlock)resolve 
 @property (nonatomic, assign) double maxBufferSeconds;
 @property (nonatomic, assign) double pausedBufferSeconds;
 @property (nonatomic, assign) double lastKnownPosition;
+@property (nonatomic, assign) int64_t expectedContentLength;
 @property (nonatomic, assign) double pendingSeekPosition;
 @property (nonatomic, assign) float currentVolume;
 @property (nonatomic, assign) float currentRate;
@@ -1378,6 +1370,7 @@ RCT_EXPORT_MODULE();
   self.channels = 0;
   self.bitsPerSample = 0;
   self.totalSamples = 0;
+  self.expectedContentLength = -1;
   self.lastKnownPosition = 0;
   self.pendingSeekPosition = 0;
   self.queuedFrames = 0;
@@ -1487,8 +1480,29 @@ RCT_EXPORT_MODULE();
 
 - (double)currentBufferedPositionLocked {
   double position = [self currentPlaybackPositionLocked];
-  if (self.sampleRate <= 0) return position;
-  double buffered = position + MAX(0, (double)self.queuedFrames / self.sampleRate);
+  double buffered = position;
+  NSUInteger streamLength = 0;
+  NSUInteger readOffset = 0;
+  [self.streamCondition lock];
+  streamLength = self.streamData.length;
+  readOffset = self.readOffset;
+  [self.streamCondition unlock];
+
+  if (self.sampleRate > 0) {
+    buffered = MAX(buffered, position + MAX(0, (double)self.queuedFrames / self.sampleRate));
+
+    NSUInteger availableCompressedBytes = streamLength > readOffset ? streamLength - readOffset : 0;
+    if (readOffset > 0 && self.decodedFramesCursor > 0 && availableCompressedBytes > 0) {
+      double estimatedDecodedFrames = ((double)availableCompressedBytes * (double)self.decodedFramesCursor) / (double)readOffset;
+      buffered = MAX(buffered, position + ((double)self.queuedFrames + estimatedDecodedFrames) / self.sampleRate);
+    }
+  }
+
+  if (self.expectedContentLength > 0 && self.duration > 0 && streamLength > 0) {
+    double downloadedPosition = ((double)streamLength / (double)self.expectedContentLength) * self.duration;
+    buffered = MAX(buffered, downloadedPosition);
+  }
+
   if (self.duration > 0) buffered = MIN(buffered, self.duration);
   return buffered;
 }
@@ -1964,6 +1978,12 @@ RCT_REMAP_METHOD(getState, getStreamStateWithResolver:(RCTPromiseResolveBlock)re
     completionHandler(NSURLSessionResponseCancel);
     return;
   }
+  int64_t expectedContentLength = response.expectedContentLength;
+  if (expectedContentLength <= 0 && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+    id contentLengthValue = [((NSHTTPURLResponse *)response) allHeaderFields][@"Content-Length"];
+    if ([contentLengthValue isKindOfClass:[NSString class]]) expectedContentLength = [contentLengthValue longLongValue];
+  }
+  self.expectedContentLength = expectedContentLength > 0 ? expectedContentLength : -1;
   completionHandler(NSURLSessionResponseAllow);
 }
 

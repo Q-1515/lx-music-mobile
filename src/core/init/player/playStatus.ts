@@ -24,6 +24,20 @@ export default () => {
     void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric)
   }
   const getElapsedTime = async() => getPosition().catch(() => playerState.progress.nowPlayTime)
+  const syncNowPlayingState = async(type: 'play' | 'pause') => {
+    const elapsedTime = await getElapsedTime()
+    if (type == 'play') {
+      await playNowPlaying({
+        elapsedTime,
+        playbackRate: settingState.setting['player.playbackRate'],
+      }).catch(() => {})
+      return
+    }
+    await pauseNowPlaying({
+      elapsedTime,
+      playbackRate: 0,
+    }).catch(() => {})
+  }
   // const updateCollectStatus = async() => {
   //   // let status = !!playMusicInfo.musicInfo && await checkListExistMusic(LIST_ID_LOVE, playerState.playMusicInfo.musicInfo.id)
   //   // if (buttons.collect == status) return false
@@ -32,24 +46,22 @@ export default () => {
   // }
 
   const handlePlay = () => {
-    void getElapsedTime().then((elapsedTime) => playNowPlaying({
-      elapsedTime,
-      playbackRate: settingState.setting['player.playbackRate'],
-    }))
-    // if (buttons.empty) buttons.empty = false
-    if (buttons.play) return
-    buttons.play = true
-    setButtons()
+    void (async() => {
+      await syncNowPlayingState('play')
+      // if (buttons.empty) buttons.empty = false
+      if (buttons.play) return
+      buttons.play = true
+      setButtons()
+    })()
   }
   const handlePause = () => {
-    void getElapsedTime().then((elapsedTime) => pauseNowPlaying({
-      elapsedTime,
-      playbackRate: 0,
-    }))
-    // if (buttons.empty) buttons.empty = false
-    if (!buttons.play) return
-    buttons.play = false
-    setButtons()
+    void (async() => {
+      await syncNowPlayingState('pause')
+      // if (buttons.empty) buttons.empty = false
+      if (!buttons.play) return
+      buttons.play = false
+      setButtons()
+    })()
   }
   const handleStop = () => {
     void stopNowPlaying({

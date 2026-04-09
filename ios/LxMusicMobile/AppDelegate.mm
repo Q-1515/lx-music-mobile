@@ -687,7 +687,16 @@ static void LXSetNowPlayingInfo(NSDictionary *metadata) {
   if (album != nil) info[MPMediaItemPropertyAlbumTitle] = album;
   if (duration != nil) info[MPMediaItemPropertyPlaybackDuration] = duration;
   if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
-  info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
+  if (playbackRate != nil) {
+    info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate;
+    if (playbackRate.doubleValue > 0) {
+      LXNowPlayingState = MPNowPlayingPlaybackStatePlaying;
+    } else if (LXNowPlayingState != MPNowPlayingPlaybackStateStopped) {
+      LXNowPlayingState = MPNowPlayingPlaybackStatePaused;
+    }
+  } else {
+    info[MPNowPlayingInfoPropertyPlaybackRate] = info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
+  }
 
   LXApplyNowPlayingInfo();
   LXSetNowPlayingArtwork(artworkPath);

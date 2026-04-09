@@ -506,20 +506,8 @@ static void LXSyncRemoteCommandAvailability(void) {
     commandCenter.togglePlayPauseCommand.enabled = NO;
     return;
   }
-
-  switch (LXNowPlayingState) {
-    case MPNowPlayingPlaybackStatePlaying:
-      commandCenter.playCommand.enabled = NO;
-      commandCenter.pauseCommand.enabled = YES;
-      break;
-    case MPNowPlayingPlaybackStatePaused:
-    case MPNowPlayingPlaybackStateStopped:
-    default:
-      commandCenter.playCommand.enabled = YES;
-      commandCenter.pauseCommand.enabled = NO;
-      break;
-  }
-
+  commandCenter.playCommand.enabled = YES;
+  commandCenter.pauseCommand.enabled = YES;
   commandCenter.togglePlayPauseCommand.enabled = NO;
 }
 

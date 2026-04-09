@@ -4,6 +4,7 @@ import { stringMd5 } from 'react-native-quick-md5'
 import { checkUrl } from '@/utils/request'
 import settingState from '@/store/setting/state'
 import {
+  getStreamingFlacBufferedPosition,
   getStreamingFlacDuration,
   getStreamingFlacPosition,
   getStreamingFlacState,
@@ -27,6 +28,17 @@ type NativeFlacEvent =
   | { type: 'ended', state?: NativeFlacState, position?: number, duration?: number, success?: boolean }
   | { type: 'warning', message?: string, state?: NativeFlacState, position?: number, duration?: number, code?: number, statusName?: string }
   | { type: 'error', message?: string, state?: NativeFlacState, position?: number, duration?: number }
+
+interface NativeFlacPlaybackContext {
+  musicInfo: LX.Player.PlayMusic
+  url: string
+  quality: LX.Quality | null
+}
+
+interface NativeFlacPlaybackSnapshot extends NativeFlacPlaybackContext {
+  position: number
+  state: NativeFlacState
+}
 
 interface NativeFlacPlayerModule {
   playFile: (path: string, position: number, volume: number, rate: number, autoplay?: boolean) => Promise<{ position: number, duration: number }>
@@ -64,11 +76,13 @@ const defaultUserAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)
 let currentTrackId = ''
 let currentState: NativeFlacState = 'idle'
 let currentMode: 'none' | 'file' | 'stream' = 'none'
+let currentPlaybackContext: NativeFlacPlaybackContext | null = null
 
 const clearCurrentContext = (nextState: NativeFlacState) => {
   currentTrackId = ''
   currentMode = 'none'
   currentState = nextState
+  currentPlaybackContext = null
 }
 
 const normalizePath = (path: string) => path.startsWith('file://')
@@ -170,9 +184,14 @@ export const prefetchNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, 
   return true
 }
 
-export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number, autoplay = true) => {
+export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url: string, position: number, autoplay = true, quality: LX.Quality | null = null) => {
   await resetNativeFlacPlayback().catch(() => {})
   const nextTrackId = `nativeflac://${getMusicInfo(musicInfo).id}`
+  const playbackContext: NativeFlacPlaybackContext = {
+    musicInfo,
+    url,
+    quality: quality ?? null,
+  }
 
   if (isRemoteUrl(url) && isStreamingFlacSupported) {
     currentTrackId = nextTrackId
@@ -186,6 +205,7 @@ export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url
       currentState = autoplay
         ? (seekPosition > 0 ? 'buffering' : 'loading')
         : 'paused'
+      currentPlaybackContext = playbackContext
       return {
         position: seekPosition,
         duration: 0,
@@ -216,6 +236,7 @@ export const startNativeFlacPlayback = async(musicInfo: LX.Player.PlayMusic, url
   currentTrackId = nextTrackId
   currentMode = 'file'
   currentState = autoplay ? 'playing' : 'paused'
+  currentPlaybackContext = playbackContext
   return {
     ...info,
     path,
@@ -285,6 +306,19 @@ export const getNativeFlacPosition = async() => {
   return NativeFlacPlayer.getPosition()
 }
 
+export const getNativeFlacBufferedPosition = async() => {
+  if (!currentTrackId) return 0
+  if (currentMode == 'stream') {
+    const [buffered, duration] = await Promise.all([
+      getStreamingFlacBufferedPosition().catch(() => 0),
+      getStreamingFlacDuration().catch(() => 0),
+    ])
+    if (!duration) return buffered
+    return Math.min(buffered, duration)
+  }
+  return getNativeFlacDuration()
+}
+
 export const getNativeFlacDuration = async() => {
   if (!currentTrackId) return 0
   if (currentMode == 'stream') return getStreamingFlacDuration().catch(() => 0)
@@ -326,6 +360,24 @@ export const setNativeFlacRate = async(rate: number) => {
 export const isNativeFlacActive = () => !!currentTrackId
 
 export const getNativeFlacTrackId = () => currentTrackId
+
+export const snapshotNativeFlacPlayback = async(): Promise<NativeFlacPlaybackSnapshot | null> => {
+  if (!currentTrackId || !currentPlaybackContext) return null
+  const [position, state] = await Promise.all([
+    getNativeFlacPosition().catch(() => 0),
+    getNativeFlacState().catch(() => currentState),
+  ])
+  return {
+    ...currentPlaybackContext,
+    position,
+    state,
+  }
+}
+
+export const restoreNativeFlacPlayback = async(snapshot: NativeFlacPlaybackSnapshot) => {
+  const shouldAutoplay = !['idle', 'paused', 'stopped'].includes(snapshot.state)
+  return startNativeFlacPlayback(snapshot.musicInfo, snapshot.url, snapshot.position, shouldAutoplay, snapshot.quality)
+}
 
 export const onNativeFlacPlayerEvent = (listener: (event: NativeFlacEvent) => void) => {
   const subscriptions: Array<() => void> = []

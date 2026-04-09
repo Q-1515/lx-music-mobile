@@ -1485,6 +1485,14 @@ RCT_EXPORT_MODULE();
   return self.lastKnownPosition;
 }
 
+- (double)currentBufferedPositionLocked {
+  double position = [self currentPlaybackPositionLocked];
+  if (self.sampleRate <= 0) return position;
+  double buffered = position + MAX(0, (double)self.queuedFrames / self.sampleRate);
+  if (self.duration > 0) buffered = MIN(buffered, self.duration);
+  return buffered;
+}
+
 - (void)configureAudioGraphWithSampleRate:(double)sampleRate channels:(NSUInteger)channels bitsPerSample:(NSUInteger)bitsPerSample {
   dispatch_sync(self.renderQueue, ^{
     if (self.engine != nil) return;
@@ -1933,6 +1941,14 @@ RCT_REMAP_METHOD(getPosition, getStreamPositionWithResolver:(RCTPromiseResolveBl
     position = [self currentPlaybackPositionLocked];
   });
   resolve(@(position));
+}
+
+RCT_REMAP_METHOD(getBufferedPosition, getStreamBufferedPositionWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  __block double buffered = 0;
+  dispatch_sync(self.renderQueue, ^{
+    buffered = [self currentBufferedPositionLocked];
+  });
+  resolve(@(buffered));
 }
 
 RCT_REMAP_METHOD(getDuration, getStreamDurationWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {

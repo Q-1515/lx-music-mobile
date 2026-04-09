@@ -290,7 +290,7 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
         await TrackPlayer.stop().catch(() => {})
       })
       clearTracks()
-      const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time, shouldAutoStart)
+      const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time, shouldAutoStart, quality ?? null)
       global.lx.playerTrackId = getNativeFlacTrackId()
       ensureCurrentTrackMetadata({
         title: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.name : musicInfo.name) ?? 'Unknow',

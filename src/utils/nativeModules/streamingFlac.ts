@@ -50,6 +50,7 @@ interface NativeStreamingFlacModule {
   setVolume?: (volume: number) => Promise<void>
   setRate?: (rate: number) => Promise<void>
   getPosition?: () => Promise<number>
+  getBufferedPosition?: () => Promise<number>
   getDuration?: () => Promise<number>
   getState?: () => Promise<StreamingFlacState>
   addListener?: (eventName: string) => void
@@ -90,6 +91,7 @@ export const seekStreamingFlac = async(position: number) => assertSupported('see
 export const setStreamingFlacVolume = async(volume: number) => assertSupported('setVolume')(volume)
 export const setStreamingFlacRate = async(rate: number) => assertSupported('setRate')(rate)
 export const getStreamingFlacPosition = async() => assertSupported('getPosition')()
+export const getStreamingFlacBufferedPosition = async() => assertSupported('getBufferedPosition')()
 export const getStreamingFlacDuration = async() => assertSupported('getDuration')()
 export const getStreamingFlacState = async() => assertSupported('getState')()
 

@@ -187,13 +187,11 @@ const updateCurrentTrackMetadata = async(metadata: {
     await TrackPlayer.updateMetadataForTrack(currentTrackIndex, metadata).catch(() => {})
   }
   if (Platform.OS == 'ios') {
-    const nowPlayingMetadata = {
+    await updateNowPlayingInfo({
       ...metadata,
+      artwork: metadata.artwork ?? '',
       playbackRate: metadata.playbackRate ?? (state.isPlaying ? settingState.setting['player.playbackRate'] : 0),
-    }
-    if (metadata.artwork !== undefined) nowPlayingMetadata.artwork = metadata.artwork
-    else if (!settingState.setting['player.isShowNotificationImage']) nowPlayingMetadata.artwork = ''
-    await updateNowPlayingInfo(nowPlayingMetadata).catch(() => {})
+    }).catch(() => {})
   } else {
     await TrackPlayer.updateNowPlayingMetadata(metadata, state.isPlaying).catch(() => {})
   }

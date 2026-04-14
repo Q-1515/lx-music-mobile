@@ -136,6 +136,24 @@ export const onHeadphonesDisconnected = (handler: () => void): () => void => {
   }
 }
 
+export const onRemoteCommand = (handler: (event: {
+  command: 'play' | 'pause' | 'toggle' | 'next' | 'previous' | 'seek'
+  position?: number
+}) => void): () => void => {
+  const eventEmitter = createEmitter()
+  if (!eventEmitter) return () => {}
+  const eventListener = eventEmitter.addListener('remote-command', event => {
+    handler(event as {
+      command: 'play' | 'pause' | 'toggle' | 'next' | 'previous' | 'seek'
+      position?: number
+    })
+  })
+
+  return () => {
+    eventListener.remove()
+  }
+}
+
 export const getWindowSize = async(): Promise<{ width: number, height: number }> => {
   if (typeof UtilsModule?.getWindowSize == 'function') return UtilsModule.getWindowSize()
 

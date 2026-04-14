@@ -492,6 +492,7 @@ static BOOL LXIsReceivingRemoteControlEvents = NO;
 static NSString * const LXTrackPlayerLifecycleNotificationName = @"LXTrackPlayerLifecycle";
 static id LXTrackPlayerLifecycleObserver = nil;
 static NSString * const LXRemoteCommandNotificationName = @"LXRemoteCommand";
+static NSString * const LXNowPlayingDebugNotificationName = @"LXNowPlayingDebug";
 static BOOL LXRemoteCommandHandlersInstalled = NO;
 
 static void LXBeginReceivingRemoteControlEvents(void);
@@ -501,6 +502,21 @@ static void LXPostRemoteCommandNotification(NSString *command, NSDictionary *ext
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:extra ?: @{}];
   if (command.length) userInfo[@"command"] = command;
   [[NSNotificationCenter defaultCenter] postNotificationName:LXRemoteCommandNotificationName object:nil userInfo:userInfo];
+}
+
+static void LXPostNowPlayingDebugNotification(NSString *stage) {
+  MPRemoteCommandCenter *commandCenter = [MPRemoteCommandCenter sharedCommandCenter];
+  NSDictionary *userInfo = @{
+    @"stage": stage ?: @"",
+    @"state": @(LXNowPlayingState),
+    @"playbackRate": LXNowPlayingInfoCache[MPNowPlayingInfoPropertyPlaybackRate] ?: [NSNull null],
+    @"elapsedTime": LXNowPlayingInfoCache[MPNowPlayingInfoPropertyElapsedPlaybackTime] ?: [NSNull null],
+    @"title": LXNowPlayingInfoCache[MPMediaItemPropertyTitle] ?: @"",
+    @"playEnabled": @(commandCenter.playCommand.isEnabled),
+    @"pauseEnabled": @(commandCenter.pauseCommand.isEnabled),
+    @"toggleEnabled": @(commandCenter.togglePlayPauseCommand.isEnabled),
+  };
+  [[NSNotificationCenter defaultCenter] postNotificationName:LXNowPlayingDebugNotificationName object:nil userInfo:userInfo];
 }
 
 static MPRemoteCommandHandlerStatus LXHandleRemoteCommandEvent(NSString *command) {
@@ -571,6 +587,7 @@ static void LXSyncRemoteCommandAvailability(void) {
   commandCenter.nextTrackCommand.enabled = YES;
   commandCenter.previousTrackCommand.enabled = YES;
   commandCenter.changePlaybackPositionCommand.enabled = YES;
+  LXPostNowPlayingDebugNotification(@"sync-commands");
   LXBeginReceivingRemoteControlEvents();
 }
 
@@ -581,6 +598,7 @@ static void LXApplyNowPlayingInfo(void) {
     center.playbackState = LXNowPlayingState;
   }
   LXSyncRemoteCommandAvailability();
+  LXPostNowPlayingDebugNotification(@"apply-info");
 }
 
 static void LXBeginReceivingRemoteControlEvents(void) {
@@ -2900,6 +2918,10 @@ RCT_EXPORT_MODULE();
                                              selector:@selector(handleRemoteCommandNotification:)
                                                  name:LXRemoteCommandNotificationName
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleNowPlayingDebugNotification:)
+                                                 name:LXNowPlayingDebugNotificationName
+                                               object:nil];
   }
   return self;
 }
@@ -2909,7 +2931,7 @@ RCT_EXPORT_MODULE();
 }
 
 - (NSArray<NSString *> *)supportedEvents {
-  return @[ @"headphones-disconnected", @"remote-command", @"screen-state", @"screen-size-changed" ];
+  return @[ @"headphones-disconnected", @"now-playing-debug", @"remote-command", @"screen-state", @"screen-size-changed" ];
 }
 
 - (void)startObserving {
@@ -2962,6 +2984,15 @@ RCT_EXPORT_MODULE();
 
   dispatch_async(dispatch_get_main_queue(), ^{
     [self sendEventWithName:@"remote-command" body:body];
+  });
+}
+
+- (void)handleNowPlayingDebugNotification:(NSNotification *)notification {
+  if (!self.hasListeners) return;
+
+  NSDictionary *userInfo = [notification.userInfo isKindOfClass:[NSDictionary class]] ? notification.userInfo : @{};
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self sendEventWithName:@"now-playing-debug" body:userInfo];
   });
 }
 

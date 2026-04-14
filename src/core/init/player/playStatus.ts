@@ -1,9 +1,7 @@
 // import { LIST_ID_LOVE } from '@/config/constant'
 
-import { getPosition, updateMetaData } from '@/plugins/player'
+import { syncNowPlayingMetadata, syncNowPlayingState } from '@/core/player/nowPlaying'
 import playerState from '@/store/player/state'
-import settingState from '@/store/setting/state'
-import { pauseNowPlaying, playNowPlaying, stopNowPlaying } from '@/utils/nativeModules/nowPlaying'
 
 export default () => {
   // const setVisibleDesktopLyric = useCommit('setVisibleDesktopLyric')
@@ -21,22 +19,7 @@ export default () => {
   const setButtons = () => {
     // setPlayerAction(buttons)
     if (!playerState.playMusicInfo.musicInfo) return
-    void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric)
-  }
-  const getElapsedTime = async() => getPosition().catch(() => playerState.progress.nowPlayTime)
-  const syncNowPlayingState = async(type: 'play' | 'pause') => {
-    const elapsedTime = await getElapsedTime()
-    if (type == 'play') {
-      await playNowPlaying({
-        elapsedTime,
-        playbackRate: settingState.setting['player.playbackRate'],
-      }).catch(() => {})
-      return
-    }
-    await pauseNowPlaying({
-      elapsedTime,
-      playbackRate: 0,
-    }).catch(() => {})
+    syncNowPlayingMetadata()
   }
   const syncPlaybackRate = () => {
     if (!playerState.playMusicInfo.musicInfo) return
@@ -72,10 +55,7 @@ export default () => {
     })()
   }
   const handleStop = () => {
-    void stopNowPlaying({
-      elapsedTime: 0,
-      playbackRate: 0,
-    })
+    void syncNowPlayingState('stop')
     buttons.play = false
     setButtons()
   }
@@ -87,7 +67,7 @@ export default () => {
   // }
   const handleSetPlayInfo = () => {
     if (!playerState.playMusicInfo.musicInfo) return
-    void updateMetaData(playerState.musicInfo, playerState.isPlay, playerState.lastLyric, true)
+    syncNowPlayingMetadata(true)
   }
   const handleConfigUpdated: typeof global.state_event.configUpdated = (keys) => {
     if (!keys.includes('player.playbackRate')) return

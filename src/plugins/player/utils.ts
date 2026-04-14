@@ -425,6 +425,19 @@ export const updateOptions = async(options = defaultUpdateOptions) => {
   return TrackPlayer.updateOptions(options)
 }
 
+export const disableTrackPlayerRemoteControls = async() => {
+  if (Platform.OS != 'ios') return
+  await TrackPlayer.clearNowPlayingMetadata().catch(() => {})
+  await TrackPlayer.updateOptions({
+    capabilities: [],
+  }).catch(() => {})
+}
+
+export const enableTrackPlayerRemoteControls = async() => {
+  if (Platform.OS != 'ios') return
+  await updateOptions().catch(() => {})
+}
+
 // export const setMaxCache = async size => {
 //   // const currentTrack = await TrackPlayer.getCurrentTrack()
 //   // if (!currentTrack) return

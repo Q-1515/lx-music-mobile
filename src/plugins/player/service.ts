@@ -12,6 +12,7 @@ import { pause, play, playNext, playPrev } from '@/core/player/player'
 import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 import { getNativeFlacTrackId, isNativeFlacActive, onNativeFlacPlayerEvent, setNativeFlacRate, setNativeFlacVolume } from './nativeFlac'
 import playerState from '@/store/player/state'
+import { log } from '@/utils/log'
 
 let isInitialized = false
 let isNativeFlacInitialized = false
@@ -243,6 +244,7 @@ const registerPlaybackService = async() => {
 const initNativeFlacEvents = () => {
   if (isNativeFlacInitialized) return
   onNativeFlacPlayerEvent((event) => {
+    log.info('[NativeFlac] event', event)
     switch (event.type) {
       case 'state':
         if (event.state == 'loading') {

@@ -565,7 +565,7 @@ static void LXSyncRemoteCommandAvailability(void) {
   BOOL isPlaying = LXNowPlayingState == MPNowPlayingPlaybackStatePlaying;
   commandCenter.playCommand.enabled = !isPlaying;
   commandCenter.pauseCommand.enabled = isPlaying;
-  commandCenter.togglePlayPauseCommand.enabled = NO;
+  commandCenter.togglePlayPauseCommand.enabled = YES;
   commandCenter.nextTrackCommand.enabled = YES;
   commandCenter.previousTrackCommand.enabled = YES;
   commandCenter.changePlaybackPositionCommand.enabled = YES;

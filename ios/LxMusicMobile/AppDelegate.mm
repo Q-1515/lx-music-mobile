@@ -578,11 +578,9 @@ static void LXSyncRemoteCommandAvailability(void) {
     return;
   }
 
-  // Let iOS derive the main transport button from playbackState.
-  // Exposing play/pause alongside toggle can leave the lock-screen button
-  // visually stale for the native FLAC path.
-  commandCenter.playCommand.enabled = NO;
-  commandCenter.pauseCommand.enabled = NO;
+  BOOL isPlaying = LXNowPlayingState == MPNowPlayingPlaybackStatePlaying;
+  commandCenter.playCommand.enabled = !isPlaying;
+  commandCenter.pauseCommand.enabled = isPlaying;
   commandCenter.togglePlayPauseCommand.enabled = YES;
   commandCenter.nextTrackCommand.enabled = YES;
   commandCenter.previousTrackCommand.enabled = YES;

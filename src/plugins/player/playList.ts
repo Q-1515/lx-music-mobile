@@ -18,6 +18,7 @@ import {
 import { loadPlaybackResource } from './engine/resourceLoader'
 
 export { getCurrentTrack, restoreTrack }
+export { state }
 
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
   const prevIsPlaying = state.isPlaying

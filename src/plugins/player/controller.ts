@@ -138,11 +138,13 @@ export const initUnifiedPlayerController = () => {
               global.lx.playerTrackId = getNativeFlacTrackId()
               void setNativeFlacVolume(settingState.setting['player.volume'])
               void setNativeFlacRate(settingState.setting['player.playbackRate'])
-              if (playerState.musicInfo.id) {
-                void updateMetaData(playerState.musicInfo, true, playerState.lastLyric, true)
-              }
             } else if (Platform.OS == 'ios') {
               void TrackPlayer.setVolume(settingState.setting['player.volume'])
+            }
+            if (Platform.OS == 'ios' && playerState.musicInfo.id) {
+              // Refresh duration/elapsed metadata after playback actually starts so the
+              // iOS lockscreen can render an active progress bar.
+              void updateMetaData(playerState.musicInfo, true, playerState.lastLyric, true)
             }
             global.app_event.playerPlaying()
             global.app_event.play()

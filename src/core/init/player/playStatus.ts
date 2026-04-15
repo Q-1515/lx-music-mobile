@@ -16,6 +16,7 @@ export default () => {
     lrc: false,
     lockLrc: false,
   }
+  let syncedDurationMusicId: string | null = null
   const setButtons = () => {
     // setPlayerAction(buttons)
     if (!playerState.playMusicInfo.musicInfo) return
@@ -67,6 +68,14 @@ export default () => {
   // }
   const handleSetPlayInfo = () => {
     if (!playerState.playMusicInfo.musicInfo) return
+    syncedDurationMusicId = null
+    syncNowPlayingMetadata(true)
+  }
+  const handlePlayProgressChanged: typeof global.state_event.playProgressChanged = (progress) => {
+    const musicId = playerState.playMusicInfo.musicInfo?.id
+    if (!musicId || progress.maxPlayTime <= 0) return
+    if (syncedDurationMusicId == musicId) return
+    syncedDurationMusicId = musicId
     syncNowPlayingMetadata(true)
   }
   const handleConfigUpdated: typeof global.state_event.configUpdated = (keys) => {
@@ -92,6 +101,7 @@ export default () => {
   global.app_event.on('stop', handleStop)
   global.app_event.on('musicToggled', handleSetPlayInfo)
   global.state_event.on('configUpdated', handleConfigUpdated)
+  global.state_event.on('playProgressChanged', handlePlayProgressChanged)
   // window.app_event.on(eventTaskbarNames.setTaskbarThumbnailClip, handleSetTaskbarThumbnailClip)
   // window.app_event.on('myListMusicUpdate', throttleListChange)
 

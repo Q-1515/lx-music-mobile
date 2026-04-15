@@ -460,17 +460,6 @@ const handlePlayNext = async(playMusicInfo: LX.Player.PlayMusicInfo) => {
   setPlayMusicInfo(playMusicInfo.listId, playMusicInfo.musicInfo, playMusicInfo.isTempPlay)
   await handlePlay()
 }
-export const retoggleCurrentMusic = async() => {
-  const playMusicInfo = playerState.playMusicInfo
-  if (!playMusicInfo.musicInfo) return
-  log.warn('retoggleCurrentMusic', {
-    musicId: playMusicInfo.musicInfo.id,
-    listId: playMusicInfo.listId,
-    isTempPlay: playMusicInfo.isTempPlay,
-  })
-  setPlayMusicInfo(playMusicInfo.listId, playMusicInfo.musicInfo, playMusicInfo.isTempPlay)
-  await handlePlay()
-}
 /**
  * 下一曲
  * @param isAutoToggle 是否自动切换

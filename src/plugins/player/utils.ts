@@ -1,17 +1,16 @@
-import TrackPlayer, { Capability, Event, RepeatMode, State } from 'react-native-track-player'
+import TrackPlayer, { Capability, RepeatMode, State } from 'react-native-track-player'
 import BackgroundTimer from 'react-native-background-timer'
-import { clearTracks, playMusic as handlePlayMusic } from './playList'
+import { playMusic as handlePlayMusic } from './playList'
+import { destroyTrackPlayerCore } from './trackPlayerCore'
 import { existsFile, moveFile, privateStorageDirectoryPath, temporaryDirectoryPath } from '@/utils/fs'
 import { toast } from '@/utils/tools'
 import { NativeModules, Platform } from 'react-native'
 import { getAccuratePosition, seekToTime } from './seek'
-import { clearNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
 import {
   getNativeFlacDuration,
   getNativeFlacPosition,
   isNativeFlacActive,
   getNativeFlacState,
-  onNativeFlacPlayerEvent,
   pauseNativeFlacPlayback,
   resetNativeFlacPlayback,
   resumeNativeFlacPlayback,
@@ -20,6 +19,7 @@ import {
   setNativeFlacVolume,
   stopNativeFlacPlayback,
 } from './nativeFlac'
+import { onUnifiedPlayerEvent } from './engine'
 // import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
 
 
@@ -278,10 +278,8 @@ export const destroy = async() => {
   if (global.lx.playerStatus.isIniting || !global.lx.playerStatus.isInitialized) return
   try {
     if (Platform.OS == 'ios') await resetNativeFlacPlayback().catch(() => {})
-    await TrackPlayer.destroy()
+    await destroyTrackPlayerCore()
   } finally {
-    if (Platform.OS == 'ios') await clearNowPlayingInfo().catch(() => {})
-    clearTracks()
     global.lx.playerStatus.isInitialized = false
   }
 }
@@ -309,39 +307,30 @@ const mapNativeFlacPlayStatus = (state: NativePlayerState): PlayStatus => {
 }
 
 export const onStateChange = async(listener: (state: PlayStatus) => void) => {
-  const sub = TrackPlayer.addEventListener(Event.PlaybackState, state => {
-    if (Platform.OS == 'ios' && isNativeFlacActive()) return
-    let _state: PlayStatus
-    switch (state) {
-      case State.Ready:
-        _state = 'Ready'
-        break
-      case State.Playing:
-        _state = 'Playing'
-        break
-      case State.Paused:
-        _state = 'Paused'
-        break
-      case State.Stopped:
-        _state = 'Stopped'
-        break
-      case State.Buffering:
-        _state = 'Buffering'
-        break
-      case State.Connecting:
-        _state = 'Connecting'
-        break
-      case State.None:
-      default:
-        _state = 'None'
-        break
-    }
-    listener(_state)
-  })
-  const removeNativeFlacListener = onNativeFlacPlayerEvent((event) => {
+  const removeUnifiedListener = onUnifiedPlayerEvent((event) => {
     switch (event.type) {
       case 'state':
-        listener(mapNativeFlacPlayStatus(event.state))
+        switch (event.state) {
+          case 'loading':
+            listener('Connecting')
+            break
+          case 'buffering':
+            listener('Buffering')
+            break
+          case 'playing':
+            listener('Playing')
+            break
+          case 'paused':
+            listener('Paused')
+            break
+          case 'stopped':
+            listener('Stopped')
+            break
+          case 'idle':
+          default:
+            listener('None')
+            break
+        }
         break
       case 'ended':
         listener('Stopped')
@@ -355,11 +344,37 @@ export const onStateChange = async(listener: (state: PlayStatus) => void) => {
     void getNativeFlacState().then((state) => {
       listener(mapNativeFlacPlayStatus(state))
     }).catch(() => {})
+  } else {
+    void TrackPlayer.getState().then((state) => {
+      switch (state) {
+        case State.Ready:
+          listener('Ready')
+          break
+        case State.Playing:
+          listener('Playing')
+          break
+        case State.Paused:
+          listener('Paused')
+          break
+        case State.Stopped:
+          listener('Stopped')
+          break
+        case State.Buffering:
+          listener('Buffering')
+          break
+        case State.Connecting:
+          listener('Connecting')
+          break
+        case State.None:
+        default:
+          listener('None')
+          break
+      }
+    }).catch(() => {})
   }
 
   return () => {
-    sub.remove()
-    removeNativeFlacListener()
+    removeUnifiedListener()
   }
 }
 

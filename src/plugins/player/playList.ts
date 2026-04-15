@@ -1,248 +1,23 @@
-import TrackPlayer from 'react-native-track-player'
 import BackgroundTimer from 'react-native-background-timer'
-import { defaultUrl } from '@/config'
-import { NativeModules, Platform } from 'react-native'
-// import { action as playerAction } from '@/store/modules/player'
+import { Platform } from 'react-native'
 import settingState from '@/store/setting/state'
-import { getAccuratePosition, seekToTime } from './seek'
-import { updateNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
+import { getAccuratePosition } from './seek'
 import {
-  getNativeFlacDuration,
   getNativeFlacPosition,
-  getNativeFlacTrackId,
   isNativeFlacActive,
-  resetNativeFlacPlayback,
-  shouldUseNativeFlacPlayer,
-  startNativeFlacPlayback,
 } from './nativeFlac'
+import {
+  formatNowPlayingTitleLine,
+  getCurrentTrack,
+  getTrackDuration,
+  initTrackInfo as handleInitTrackInfo,
+  restoreTrack,
+  trackPlayerState as state,
+  updateCurrentTrackMetadata,
+} from './trackPlayerCore'
+import { loadPlaybackResource } from './engine/resourceLoader'
 
-
-const list: LX.Player.Track[] = []
-
-const defaultUserAgent = 'Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Mobile Safari/537.36'
-const httpRxp = /^(https?:\/\/.+|\/.+)/
-const wait = async(ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
-export const state = {
-  isPlaying: false,
-  prevDuration: -1,
-}
-
-const NativeTrackPlayerModule = NativeModules.TrackPlayerModule as {
-  getDuration?: () => Promise<number>
-}
-
-const formatNowPlayingTitleLine = (title?: string, artist?: string) => {
-  const safeTitle = title ?? 'Unknow'
-  return artist ? `${safeTitle} - ${artist}` : safeTitle
-}
-
-const formatIOSNowPlayingMetadata = (metadata: {
-  title?: string
-  artist?: string
-  artwork?: string
-  duration?: number
-  elapsedTime?: number
-  playbackRate?: number
-  lyric?: string
-}) => {
-  return {
-    title: formatNowPlayingTitleLine(metadata.title, metadata.artist),
-    artist: metadata.lyric ?? '',
-    album: '',
-    artwork: metadata.artwork,
-    duration: metadata.duration,
-    elapsedTime: metadata.elapsedTime,
-    playbackRate: metadata.playbackRate,
-  }
-}
-
-const formatMusicInfo = (musicInfo: LX.Player.PlayMusic) => {
-  return 'progress' in musicInfo ? {
-    id: musicInfo.id,
-    pic: musicInfo.metadata.musicInfo.meta.picUrl,
-    name: musicInfo.metadata.musicInfo.name,
-    singer: musicInfo.metadata.musicInfo.singer,
-    album: musicInfo.metadata.musicInfo.meta.albumName,
-  } : {
-    id: musicInfo.id,
-    pic: musicInfo.meta.picUrl,
-    name: musicInfo.name,
-    singer: musicInfo.singer,
-    album: musicInfo.meta.albumName,
-  }
-}
-
-const buildTracks = (musicInfo: LX.Player.PlayMusic, url?: LX.Player.Track['url'], duration?: LX.Player.Track['duration']): LX.Player.Track[] => {
-  const mInfo = formatMusicInfo(musicInfo)
-  const track = [] as LX.Player.Track[]
-  const isShowNotificationImage = settingState.setting['player.isShowNotificationImage']
-  const album = mInfo.album || undefined
-  const artwork = isShowNotificationImage && mInfo.pic && httpRxp.test(mInfo.pic) ? mInfo.pic : undefined
-  if (url) {
-    track.push({
-      id: `${mInfo.id}__//${Math.random()}__//${url}`,
-      url,
-      title: mInfo.name || 'Unknow',
-      artist: mInfo.singer || 'Unknow',
-      album,
-      artwork,
-      userAgent: defaultUserAgent,
-      musicId: mInfo.id,
-      // original: { ...musicInfo },
-      duration,
-    })
-  }
-  if (!url || Platform.OS != 'ios') {
-    track.push({
-      id: `${mInfo.id}__//${Math.random()}__//default`,
-      url: defaultUrl,
-      title: mInfo.name || 'Unknow',
-      artist: mInfo.singer || 'Unknow',
-      album,
-      artwork,
-      musicId: mInfo.id,
-      // original: { ...musicInfo },
-      duration: 0,
-    })
-  }
-  return track
-  // console.log('buildTrack', musicInfo.name, url)
-}
-// const buildTrack = (musicInfo: LX.Player.PlayMusic, url: LX.Player.Track['url'], duration?: LX.Player.Track['duration']): LX.Player.Track => {
-//   const mInfo = formatMusicInfo(musicInfo)
-//   const isShowNotificationImage = settingState.setting['player.isShowNotificationImage']
-//   const album = mInfo.album || undefined
-//   const artwork = isShowNotificationImage && mInfo.pic && httpRxp.test(mInfo.pic) ? mInfo.pic : undefined
-//   return url
-//     ? {
-//         id: `${mInfo.id}__//${Math.random()}__//${url}`,
-//         url,
-//         title: mInfo.name || 'Unknow',
-//         artist: mInfo.singer || 'Unknow',
-//         album,
-//         artwork,
-//         userAgent: defaultUserAgent,
-//         musicId: `${mInfo.id}`,
-//         original: { ...musicInfo },
-//         duration,
-//       }
-//     : {
-//         id: `${mInfo.id}__//${Math.random()}__//default`,
-//         url: defaultUrl,
-//         title: mInfo.name || 'Unknow',
-//         artist: mInfo.singer || 'Unknow',
-//         album,
-//         artwork,
-//         musicId: `${mInfo.id}`,
-//         original: { ...musicInfo },
-//         duration: 0,
-//       }
-// }
-
-export const isTempTrack = (trackId: string) => /\/\/default$/.test(trackId)
-
-
-export const getCurrentTrackId = async() => {
-  const currentTrackIndex = await TrackPlayer.getCurrentTrack()
-  return list[currentTrackIndex]?.id
-}
-export const getCurrentTrack = async() => {
-  const currentTrackIndex = await TrackPlayer.getCurrentTrack()
-  return list[currentTrackIndex]
-}
-
-const applyCurrentVolume = async() => {
-  if (Platform.OS == 'ios' && isNativeFlacActive()) return
-  await TrackPlayer.setVolume(settingState.setting['player.volume'])
-}
-
-const getTrackDuration = async() => {
-  if (Platform.OS == 'ios' && isNativeFlacActive()) return getNativeFlacDuration()
-  if (Platform.OS == 'ios' && typeof NativeTrackPlayerModule?.getDuration == 'function') {
-    return NativeTrackPlayerModule.getDuration()
-  }
-  return TrackPlayer.getDuration()
-}
-
-export const clearTracks = () => {
-  list.length = 0
-  prevArtwork = undefined
-  state.isPlaying = false
-  state.prevDuration = -1
-}
-
-const updateCurrentTrackMetadata = async(metadata: {
-  title?: string
-  artist?: string
-  album?: string
-  artwork?: string
-  duration?: number
-  elapsedTime?: number
-  playbackRate?: number
-}) => {
-  const currentTrackIndex = await TrackPlayer.getCurrentTrack().catch(() => null)
-  if (currentTrackIndex != null && currentTrackIndex > -1) {
-    await TrackPlayer.updateMetadataForTrack(currentTrackIndex, metadata).catch(() => {})
-  }
-  if (Platform.OS == 'ios') {
-    const nowPlayingMetadata: Parameters<typeof updateNowPlayingInfo>[0] = {
-      ...metadata,
-      artwork: metadata.artwork ?? '',
-    }
-    if (metadata.playbackRate !== undefined) nowPlayingMetadata.playbackRate = metadata.playbackRate
-    await updateNowPlayingInfo(nowPlayingMetadata).catch(() => {})
-  } else {
-    await TrackPlayer.updateNowPlayingMetadata(metadata, state.isPlaying).catch(() => {})
-  }
-}
-
-const ensureCurrentTrackMetadata = (metadata: {
-  title?: string
-  artist?: string
-  album?: string
-  artwork?: string
-  duration?: number
-  elapsedTime?: number
-  playbackRate?: number
-}) => {
-  void (async() => {
-    const targetMetadata = Platform.OS == 'ios' ? formatIOSNowPlayingMetadata(metadata) : metadata
-    const delays = Platform.OS == 'ios' ? [0, 160, 420, 900] : [0]
-    for (const delay of delays) {
-      if (delay) await wait(delay)
-      await updateCurrentTrackMetadata(targetMetadata)
-    }
-  })()
-}
-
-export const restoreTrack = async(track: LX.Player.Track, position: number, isPlaying: boolean) => {
-  const restoredTrack = { ...track }
-  await TrackPlayer.add([restoredTrack]).then(() => list.push(restoredTrack))
-  const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
-  const trackIndex = queue.findIndex(t => t.id == restoredTrack.id)
-  if (trackIndex > -1) await TrackPlayer.skip(trackIndex)
-  global.lx.playerTrackId = restoredTrack.id
-  if (position > 0) await seekToTime(position)
-  if (isPlaying) await TrackPlayer.play()
-  else await TrackPlayer.pause()
-  await applyCurrentVolume()
-  ensureCurrentTrackMetadata({
-    title: restoredTrack.title,
-    artist: restoredTrack.artist,
-    album: restoredTrack.album,
-    artwork: typeof restoredTrack.artwork == 'string' ? restoredTrack.artwork : undefined,
-    duration: restoredTrack.duration,
-    elapsedTime: position,
-  })
-}
-
-const resolveShouldAutoStart = (currentTrackIndex: number | null) => {
-  if (currentTrackIndex != null) return true
-  if (!global.lx.restorePlayInfo) return true
-  global.lx.restorePlayInfo = null
-  return false
-}
+export { getCurrentTrack, restoreTrack }
 
 export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: boolean, lyric?: string, force = false) => {
   const prevIsPlaying = state.isPlaying
@@ -272,84 +47,11 @@ export const updateMetaData = async(musicInfo: LX.Player.MusicInfo, isPlay: bool
 }
 
 export const initTrackInfo = async(musicInfo: LX.Player.PlayMusic, mInfo: LX.Player.MusicInfo) => {
-  const tracks = buildTracks(musicInfo)
-  await TrackPlayer.add(tracks).then(() => list.push(...tracks))
-  const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
-  await TrackPlayer.skip(queue.findIndex(t => t.id == tracks[0].id))
-  delayUpdateMusicInfo(mInfo)
+  await handleInitTrackInfo(musicInfo, mInfo, delayUpdateMusicInfo)
 }
 
-
 const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time: number, quality?: LX.Quality | null) => {
-  const currentTrackIndex = await TrackPlayer.getCurrentTrack()
-  const shouldAutoStart = resolveShouldAutoStart(currentTrackIndex)
-  if (Platform.OS == 'ios' && await shouldUseNativeFlacPlayer(musicInfo, url, quality)) {
-    global.lx.playerStatus.ignoreTrackPlayerLifecycle = true
-    try {
-      await TrackPlayer.reset().catch(async() => {
-        await TrackPlayer.stop().catch(() => {})
-      })
-      clearTracks()
-      const playbackInfo = await startNativeFlacPlayback(musicInfo, url, time, shouldAutoStart, quality ?? null)
-      global.lx.playerTrackId = getNativeFlacTrackId()
-      ensureCurrentTrackMetadata({
-        title: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.name : musicInfo.name) ?? 'Unknow',
-        artist: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.singer : musicInfo.singer) ?? 'Unknow',
-        album: ('progress' in musicInfo ? musicInfo.metadata.musicInfo.meta.albumName : musicInfo.meta.albumName) ?? undefined,
-        artwork: 'progress' in musicInfo
-          ? (typeof musicInfo.metadata.musicInfo.meta.picUrl == 'string' ? musicInfo.metadata.musicInfo.meta.picUrl : undefined)
-          : (typeof musicInfo.meta.picUrl == 'string' ? musicInfo.meta.picUrl : undefined),
-        duration: playbackInfo.duration,
-        elapsedTime: playbackInfo.position,
-      })
-      return
-    } finally {
-      global.lx.playerStatus.ignoreTrackPlayerLifecycle = false
-    }
-  }
-  if (Platform.OS == 'ios') {
-    await resetNativeFlacPlayback().catch(() => {})
-  }
-  // console.log(tracks, time)
-  const tracks = buildTracks(musicInfo, url)
-  const track = tracks[0]
-  // await updateMusicInfo(track)
-  await TrackPlayer.add(tracks).then(() => list.push(...tracks))
-  const queue = await TrackPlayer.getQueue() as LX.Player.Track[]
-  await TrackPlayer.skip(queue.findIndex(t => t.id == track.id))
-  global.lx.playerTrackId = track.id
-
-  if (currentTrackIndex == null) {
-    if (!isTempTrack(track.id as string)) {
-      if (time) await seekToTime(time)
-      if (!shouldAutoStart) {
-        await TrackPlayer.pause()
-      } else {
-        await TrackPlayer.play()
-        await applyCurrentVolume()
-      }
-    }
-  } else {
-    await TrackPlayer.pause()
-    if (!isTempTrack(track.id as string)) {
-      await seekToTime(time)
-      await TrackPlayer.play()
-      await applyCurrentVolume()
-    }
-  }
-
-  if (queue.length > tracks.length) {
-    const removeCount = queue.length - tracks.length
-    void TrackPlayer.remove(Array(removeCount).fill(null).map((_, i) => i)).then(() => list.splice(0, list.length - removeCount))
-  }
-  ensureCurrentTrackMetadata({
-    title: track.title,
-    artist: track.artist,
-    album: track.album,
-    artwork: typeof track.artwork == 'string' ? track.artwork : undefined,
-    duration: track.duration,
-    elapsedTime: time,
-  })
+  await loadPlaybackResource({ musicInfo, url, time, quality })
 }
 let playPromise = Promise.resolve()
 let actionId = Math.random()
@@ -369,7 +71,6 @@ export const playMusic = (musicInfo: LX.Player.PlayMusic, url: string, time: num
 
 // let musicId = null
 // let duration = 0
-let prevArtwork: string | undefined
 const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string, isPlaying = state.isPlaying) => {
   console.log('updateMetaInfo', lyric)
   const isShowNotificationImage = settingState.setting['player.isShowNotificationImage']
@@ -386,8 +87,7 @@ const updateMetaInfo = async(mInfo: LX.Player.MusicInfo, lyric?: string, isPlayi
   // }
   // console.log('+++++updateMetaInfo+++++', mInfo.name)
   state.isPlaying = isPlaying
-  let artwork = isShowNotificationImage ? mInfo.pic ?? prevArtwork : undefined
-  if (mInfo.pic) prevArtwork = mInfo.pic
+  let artwork = isShowNotificationImage ? mInfo.pic ?? undefined : undefined
   let name: string
   let singer: string
   let album: string | undefined

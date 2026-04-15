@@ -4,30 +4,10 @@ import {
   getNativeFlacBufferedPosition,
   getNativeFlacDuration,
   getNativeFlacPosition,
-  getNativeFlacState,
   isNativeFlacActive,
   onNativeFlacPlayerEvent,
 } from './nativeFlac'
-
-type NativePlayerState = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'stopped'
-
-const mapNativeFlacState = (state: NativePlayerState) => {
-  switch (state) {
-    case 'loading':
-      return State.Connecting
-    case 'buffering':
-      return State.Buffering
-    case 'playing':
-      return State.Playing
-    case 'paused':
-      return State.Paused
-    case 'stopped':
-      return State.Stopped
-    case 'idle':
-    default:
-      return State.None
-  }
-}
+import { getUnifiedPlaybackState, onUnifiedPlayerEvent } from './engine'
 
 /** Get current playback state and subsequent updatates  */
 export const usePlaybackState = () => {
@@ -35,38 +15,67 @@ export const usePlaybackState = () => {
 
   useEffect(() => {
     async function setPlayerState() {
-      if (isNativeFlacActive()) {
-        const nativeState = await getNativeFlacState().catch(() => 'idle' as const)
-        setState(mapNativeFlacState(nativeState))
-        return
+      const unifiedState = await getUnifiedPlaybackState()
+      switch (unifiedState) {
+        case 'loading':
+          setState(State.Connecting)
+          break
+        case 'buffering':
+          setState(State.Buffering)
+          break
+        case 'playing':
+          setState(State.Playing)
+          break
+        case 'paused':
+          setState(State.Paused)
+          break
+        case 'stopped':
+          setState(State.Stopped)
+          break
+        case 'idle':
+        default:
+          setState(State.None)
+          break
       }
-      const playerState = await TrackPlayer.getState()
-      setState(playerState)
     }
 
     void setPlayerState()
 
-    const sub = TrackPlayer.addEventListener(Event.PlaybackState, data => {
-      if (isNativeFlacActive()) return
-      setState(data.state as State)
-    })
-    const removeNativeFlacListener = onNativeFlacPlayerEvent((event) => {
-      switch (event.type) {
-        case 'state':
-          setState(mapNativeFlacState(event.state))
+    const removeUnifiedListener = onUnifiedPlayerEvent((event) => {
+      if (event.type == 'ended') {
+        setState(State.Stopped)
+        return
+      }
+      if (event.type == 'error') {
+        setState(State.Paused)
+        return
+      }
+      if (event.type != 'state') return
+      switch (event.state) {
+        case 'loading':
+          setState(State.Connecting)
           break
-        case 'ended':
+        case 'buffering':
+          setState(State.Buffering)
+          break
+        case 'playing':
+          setState(State.Playing)
+          break
+        case 'paused':
+          setState(State.Paused)
+          break
+        case 'stopped':
           setState(State.Stopped)
           break
-        case 'error':
-          setState(State.Paused)
+        case 'idle':
+        default:
+          setState(State.None)
           break
       }
     })
 
     return () => {
-      sub.remove()
-      removeNativeFlacListener()
+      removeUnifiedListener()
     }
   }, [])
 

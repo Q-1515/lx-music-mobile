@@ -29,7 +29,9 @@ export const seekToTime = async(targetTime: number) => {
   ] as const) {
     await wait(delay)
     const currentPosition = await getAccuratePosition().catch(() => position)
-    if (currentPosition > 0) position = currentPosition
+    const nextPosition = currentPosition > 0 ? currentPosition : position
+    // eslint-disable-next-line require-atomic-updates
+    position = nextPosition
     if (Math.abs(position - targetTime) <= tolerance) {
       stableCount++
       if (stableCount > 1 || tolerance <= 0.22) break
@@ -39,6 +41,7 @@ export const seekToTime = async(targetTime: number) => {
     await TrackPlayer.seekTo(targetTime)
   }
   const finalPosition = await getAccuratePosition().catch(() => position)
-  if (finalPosition > 0) position = finalPosition
+  // eslint-disable-next-line require-atomic-updates
+  position = finalPosition > 0 ? finalPosition : position
   return position
 }

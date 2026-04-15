@@ -687,6 +687,10 @@ static NSNumber *LXCurrentNowPlayingRate(void) {
   return rate ?: LXDefaultNowPlayingRate();
 }
 
+static NSNumber *LXNowPlayingDefaultPlaybackRateValue(void) {
+  return @1;
+}
+
 static void LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackState state, NSDictionary *options) {
   LXNowPlayingState = state;
 
@@ -699,6 +703,7 @@ static void LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackState state, NSDict
   else if (state == MPNowPlayingPlaybackStateStopped) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @0;
 
   info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: LXDefaultNowPlayingRate();
+  info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = LXNowPlayingDefaultPlaybackRateValue();
   LXApplyNowPlayingInfo();
 }
 
@@ -756,6 +761,7 @@ static void LXSetNowPlayingInfo(NSDictionary *metadata) {
   if (duration != nil) info[MPMediaItemPropertyPlaybackDuration] = duration;
   if (elapsedTime != nil) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime;
   info[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate ?: info[MPNowPlayingInfoPropertyPlaybackRate] ?: LXDefaultNowPlayingRate();
+  info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = info[MPNowPlayingInfoPropertyDefaultPlaybackRate] ?: LXNowPlayingDefaultPlaybackRateValue();
 
   LXApplyNowPlayingInfo();
   LXSetNowPlayingArtwork(artworkPath);

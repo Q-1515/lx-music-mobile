@@ -154,36 +154,6 @@ export const onRemoteCommand = (handler: (event: {
   }
 }
 
-export const onNowPlayingDebug = (handler: (event: {
-  stage: string
-  state: number
-  playbackRate?: number | null
-  elapsedTime?: number | null
-  title?: string
-  playEnabled: boolean
-  pauseEnabled: boolean
-  toggleEnabled: boolean
-}) => void): () => void => {
-  const eventEmitter = createEmitter()
-  if (!eventEmitter) return () => {}
-  const eventListener = eventEmitter.addListener('now-playing-debug', event => {
-    handler(event as {
-      stage: string
-      state: number
-      playbackRate?: number | null
-      elapsedTime?: number | null
-      title?: string
-      playEnabled: boolean
-      pauseEnabled: boolean
-      toggleEnabled: boolean
-    })
-  })
-
-  return () => {
-    eventListener.remove()
-  }
-}
-
 export const getWindowSize = async(): Promise<{ width: number, height: number }> => {
   if (typeof UtilsModule?.getWindowSize == 'function') return UtilsModule.getWindowSize()
 

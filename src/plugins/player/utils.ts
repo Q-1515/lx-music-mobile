@@ -372,7 +372,13 @@ export const onStateChange = async(listener: (state: PlayStatus) => void) => {
 
 const defaultUpdateOptions = Platform.OS == 'ios'
   ? {
-      capabilities: [],
+      capabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.SeekTo,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+      ],
     }
   : {
       // Whether the player should stop running when the app is closed on Android

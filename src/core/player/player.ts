@@ -70,6 +70,16 @@ interface PlayUrlInfo {
   url: string
   quality: LX.Quality | null
 }
+const currentStreamInfo = {
+  musicId: null as string | null,
+  url: '',
+  quality: null as LX.Quality | null,
+}
+export const getCurrentStreamInfo = () => {
+  const musicId = playerState.playMusicInfo.musicInfo?.id
+  if (!musicId || currentStreamInfo.musicId != musicId) return null
+  return { ...currentStreamInfo }
+}
 /**
  * 检查音乐信息是否已更改
  */
@@ -158,6 +168,9 @@ export const setMusicUrl = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   void getMusicPlayUrl(musicInfo, isRefresh).then(async(result) => {
     if (!result) return
     const currentTime = await currentTimePromise
+    currentStreamInfo.musicId = musicInfo.id
+    currentStreamInfo.url = result.url
+    currentStreamInfo.quality = result.quality
     log.info('setMusicUrl:resolved', {
       musicId: musicInfo.id,
       isRefresh: !!isRefresh,
@@ -443,6 +456,17 @@ const handlePlayNext = async(playMusicInfo: LX.Player.PlayMusicInfo) => {
     listId: playMusicInfo.listId,
     isTempPlay: playMusicInfo.isTempPlay,
     prevMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+  })
+  setPlayMusicInfo(playMusicInfo.listId, playMusicInfo.musicInfo, playMusicInfo.isTempPlay)
+  await handlePlay()
+}
+export const retoggleCurrentMusic = async() => {
+  const playMusicInfo = playerState.playMusicInfo
+  if (!playMusicInfo.musicInfo) return
+  log.warn('retoggleCurrentMusic', {
+    musicId: playMusicInfo.musicInfo.id,
+    listId: playMusicInfo.listId,
+    isTempPlay: playMusicInfo.isTempPlay,
   })
   setPlayMusicInfo(playMusicInfo.listId, playMusicInfo.musicInfo, playMusicInfo.isTempPlay)
   await handlePlay()

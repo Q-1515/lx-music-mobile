@@ -1,4 +1,4 @@
-import { playNext, setMusicUrl } from '@/core/player/player'
+import { getCurrentStreamInfo, playNext, retoggleCurrentMusic, setMusicUrl } from '@/core/player/player'
 import { setStatusText } from '@/core/player/playStatus'
 import { getPosition, isEmpty, setStop } from '@/plugins/player/utils'
 import { isActive } from '@/utils/tools'
@@ -10,6 +10,7 @@ import { log } from '@/utils/log'
 
 export default () => {
   let retryNum = 0
+  let flacRetoggleRetryNum = 0
   let prevTimeoutId: string | null = null
 
   let loadingTimeout: number | null = null
@@ -92,12 +93,16 @@ export default () => {
     if (!playerState.musicInfo.id) return
     clearLoadingTimeout()
     if (global.lx.isPlayedStop) return
+    const currentStreamInfo = getCurrentStreamInfo()
     log.warn('player handleError', {
       currentMusicId: playerState.musicInfo.id,
       playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
       trackId: global.lx.playerTrackId,
       gettingUrlId: global.lx.gettingUrlId,
       retryNum,
+      flacRetoggleRetryNum,
+      streamQuality: currentStreamInfo?.quality ?? null,
+      streamUrl: currentStreamInfo?.url ?? '',
       isPlay: playerState.isPlay,
     })
     if (playerState.playMusicInfo.musicInfo && retryNum < 2) { // 若音频URL无效则尝试刷新2次URL
@@ -113,6 +118,26 @@ export default () => {
       })
       return
     }
+    const isFlacStream = currentStreamInfo != null && (
+      currentStreamInfo.quality == 'flac' ||
+      currentStreamInfo.quality == 'flac24bit' ||
+      /\.flac(?:$|[?#])/i.test(currentStreamInfo.url)
+    )
+    if (playerState.playMusicInfo.musicInfo && isFlacStream && flacRetoggleRetryNum < 1) {
+      flacRetoggleRetryNum++
+      log.warn('player handleError retoggle current flac', {
+        musicId: playerState.playMusicInfo.musicInfo.id,
+        retryNum,
+        flacRetoggleRetryNum,
+        streamQuality: currentStreamInfo?.quality ?? null,
+        streamUrl: currentStreamInfo?.url ?? '',
+      })
+      setStatusText(global.i18n.t('player__refresh_url'))
+      setTimeout(() => {
+        void retoggleCurrentMusic()
+      })
+      return
+    }
     if (!isEmpty()) void setStop()
     if (isActive()) {
       setStatusText(global.i18n.t('player__error'))
@@ -125,6 +150,7 @@ export default () => {
 
   const handleSetPlayInfo = () => {
     retryNum = 0
+    flacRetoggleRetryNum = 0
     prevTimeoutId = null
     clearDelayNextTimeout()
     clearLoadingTimeout()

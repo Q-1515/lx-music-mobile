@@ -12,6 +12,7 @@ import { pause, play, playNext, playPrev } from '@/core/player/player'
 import { markTimeoutExitInteraction } from '@/core/player/timeoutExit'
 import { getNativeFlacTrackId, isNativeFlacActive, onNativeFlacPlayerEvent, setNativeFlacRate, setNativeFlacVolume } from './nativeFlac'
 import playerState from '@/store/player/state'
+import { log } from '@/utils/log'
 
 let isInitialized = false
 let isNativeFlacInitialized = false
@@ -82,7 +83,14 @@ const registerPlaybackService = async() => {
 
   TrackPlayer.addEventListener(TPEvent.PlaybackError, async(err: any) => {
     if (shouldIgnoreTrackPlayerLifecycle()) return
-    console.log('playback-error', err)
+    log.error('playback-error', {
+      err,
+      currentMusicId: playerState.musicInfo.id,
+      playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+      trackId: global.lx.playerTrackId,
+      gettingUrlId: global.lx.gettingUrlId,
+      isPlay: playerState.isPlay,
+    })
     global.app_event.error()
     global.app_event.playerError()
   })
@@ -134,6 +142,12 @@ const registerPlaybackService = async() => {
     if (shouldIgnoreTrackPlayerLifecycle()) return
     // console.log('PlaybackTrackChanged====>', info)
     global.lx.playerTrackId = await getCurrentTrackId()
+    log.info('playback-track-changed', {
+      info,
+      currentMusicId: playerState.musicInfo.id,
+      playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+      trackId: global.lx.playerTrackId,
+    })
     if (info.track == null) return
     if (global.lx.isPlayedStop) return handleExitApp('Timeout Exit')
     if (Platform.OS == 'ios') {
@@ -279,7 +293,13 @@ const initNativeFlacEvents = () => {
         global.app_event.playerEmptied()
         break
       case 'error':
-        console.log('native flac playback-error', event.message)
+        log.error('native flac playback-error', {
+          message: event.message,
+          currentMusicId: playerState.musicInfo.id,
+          playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+          trackId: global.lx.playerTrackId,
+          gettingUrlId: global.lx.gettingUrlId,
+        })
         global.app_event.error()
         global.app_event.playerError()
         break

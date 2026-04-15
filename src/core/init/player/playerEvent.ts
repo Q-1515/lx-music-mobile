@@ -5,6 +5,7 @@ import { isActive } from '@/utils/tools'
 import BackgroundTimer from 'react-native-background-timer'
 import playerState from '@/store/player/state'
 import { setNowPlayTime } from '@/core/player/progress'
+import { log } from '@/utils/log'
 
 
 export default () => {
@@ -91,6 +92,14 @@ export default () => {
     if (!playerState.musicInfo.id) return
     clearLoadingTimeout()
     if (global.lx.isPlayedStop) return
+    log.warn('player handleError', {
+      currentMusicId: playerState.musicInfo.id,
+      playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+      trackId: global.lx.playerTrackId,
+      gettingUrlId: global.lx.gettingUrlId,
+      retryNum,
+      isPlay: playerState.isPlay,
+    })
     if (playerState.playMusicInfo.musicInfo && retryNum < 2) { // 若音频URL无效则尝试刷新2次URL
       let musicInfo = playerState.playMusicInfo.musicInfo
       void getPosition().then((position) => {

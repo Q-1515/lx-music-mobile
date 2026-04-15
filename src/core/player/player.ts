@@ -29,6 +29,7 @@ import { LIST_IDS } from '@/config/constant'
 import { addListMusics, removeListMusics } from '@/core/list'
 import { addDislikeInfo } from '@/core/dislikeList'
 import { markTimeoutExitInteraction } from './timeoutExit'
+import { log } from '@/utils/log'
 
 // import { checkMusicFileAvailable } from '@renderer/utils/music'
 
@@ -143,20 +144,47 @@ export const setMusicUrl = (musicInfo: LX.Music.MusicInfo | LX.Download.ListItem
   if (!diffCurrentMusicInfo(musicInfo)) return
   if (cancelDelayRetry) cancelDelayRetry()
   global.lx.gettingUrlId = createGettingUrlId(musicInfo)
+  log.info('setMusicUrl:start', {
+    musicId: musicInfo.id,
+    isRefresh: !!isRefresh,
+    gettingUrlId: global.lx.gettingUrlId,
+    currentMusicId: playerState.musicInfo.id,
+    playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+    isPlay: playerState.isPlay,
+  })
   const currentTimePromise = isRefresh
     ? getPosition().catch(() => playerState.progress.nowPlayTime)
     : Promise.resolve(playerState.progress.nowPlayTime)
   void getMusicPlayUrl(musicInfo, isRefresh).then(async(result) => {
     if (!result) return
     const currentTime = await currentTimePromise
+    log.info('setMusicUrl:resolved', {
+      musicId: musicInfo.id,
+      isRefresh: !!isRefresh,
+      currentTime,
+      quality: result.quality,
+      url: result.url,
+    })
     setResource(musicInfo, result.url, currentTime, result.quality)
   }).catch((err: any) => {
-    console.log(err)
+    log.error('setMusicUrl:error', {
+      musicId: musicInfo.id,
+      isRefresh: !!isRefresh,
+      message: err?.message ?? err,
+      currentMusicId: playerState.musicInfo.id,
+      playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+      gettingUrlId: global.lx.gettingUrlId,
+    })
     setStatusText(err.message as string)
     global.app_event.error()
     addDelayNextTimeout()
   }).finally(() => {
     if (musicInfo === playerState.playMusicInfo.musicInfo) {
+      log.info('setMusicUrl:finally', {
+        musicId: musicInfo.id,
+        currentMusicId: playerState.musicInfo.id,
+        playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+      })
       global.lx.gettingUrlId = ''
       clearLoadTimeout()
     }
@@ -410,6 +438,12 @@ export const getNextPlayMusicInfo = async(): Promise<LX.Player.PlayMusicInfo | n
 }
 
 const handlePlayNext = async(playMusicInfo: LX.Player.PlayMusicInfo) => {
+  log.info('handlePlayNext', {
+    musicId: playMusicInfo.musicInfo.id,
+    listId: playMusicInfo.listId,
+    isTempPlay: playMusicInfo.isTempPlay,
+    prevMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
+  })
   setPlayMusicInfo(playMusicInfo.listId, playMusicInfo.musicInfo, playMusicInfo.isTempPlay)
   await handlePlay()
 }

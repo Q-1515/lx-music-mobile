@@ -6,13 +6,12 @@ import { initUnifiedPlayerEngine, onUnifiedPlayerEvent } from './engine'
 import { getNativeFlacTrackId, setNativeFlacRate, setNativeFlacVolume } from './nativeFlac'
 import { getPosition, isEmpty, setStop } from './utils'
 import { exitApp } from '@/core/common'
-import { getCurrentStreamInfo, playNext, setMusicUrl } from '@/core/player/player'
+import { playNext, setMusicUrl } from '@/core/player/player'
 import { setStatusText } from '@/core/player/playStatus'
 import { isActive } from '@/utils/tools'
 import playerState from '@/store/player/state'
 import settingState from '@/store/setting/state'
 import { setNowPlayTime } from '@/core/player/progress'
-import { log } from '@/utils/log'
 
 let isInitialized = false
 
@@ -77,17 +76,6 @@ export const initUnifiedPlayerController = () => {
     if (!playerState.musicInfo.id) return
     clearLoadingTimeout()
     if (global.lx.isPlayedStop) return
-    const currentStreamInfo = getCurrentStreamInfo()
-    log.warn('player handleError', {
-      currentMusicId: playerState.musicInfo.id,
-      playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
-      trackId: global.lx.playerTrackId,
-      gettingUrlId: global.lx.gettingUrlId,
-      retryNum,
-      streamQuality: currentStreamInfo?.quality ?? null,
-      streamUrl: currentStreamInfo?.url ?? '',
-      isPlay: playerState.isPlay,
-    })
     if (playerState.playMusicInfo.musicInfo && retryNum < 2) {
       const musicInfo = playerState.playMusicInfo.musicInfo
       void getPosition().then((position) => {
@@ -161,36 +149,12 @@ export const initUnifiedPlayerController = () => {
         if (global.lx.isPlayedStop) void handleExitApp('Timeout Exit')
         break
       case 'error':
-        if (event.driver == 'trackPlayer') {
-          log.error('playback-error', {
-            err: event.error,
-            currentMusicId: playerState.musicInfo.id,
-            playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
-            trackId: global.lx.playerTrackId,
-            gettingUrlId: global.lx.gettingUrlId,
-            isPlay: playerState.isPlay,
-          })
-        } else {
-          log.error('native flac playback-error', {
-            message: event.error?.message,
-            currentMusicId: playerState.musicInfo.id,
-            playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
-            trackId: global.lx.playerTrackId,
-            gettingUrlId: global.lx.gettingUrlId,
-          })
-        }
         global.app_event.error()
         global.app_event.playerError()
         handleControllerError()
         break
       case 'trackChanged':
         global.lx.playerTrackId = event.trackId
-        log.info('playback-track-changed', {
-          info: event.info,
-          currentMusicId: playerState.musicInfo.id,
-          playMusicId: playerState.playMusicInfo.musicInfo?.id ?? null,
-          trackId: global.lx.playerTrackId,
-        })
         if (event.info?.track == null) return
         if (global.lx.isPlayedStop) return handleExitApp('Timeout Exit')
         if (Platform.OS == 'ios' && event.driver == 'trackPlayer') {

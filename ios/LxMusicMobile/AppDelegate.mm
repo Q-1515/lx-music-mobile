@@ -1142,6 +1142,7 @@ RCT_REMAP_METHOD(resume, resumeWithResolver:(RCTPromiseResolveBlock)resolve reje
 
     self.manualPause = NO;
     self.interruptedBySystem = NO;
+    LXBeginReceivingRemoteControlEvents();
     [self emitState:@"playing" position:nil duration:nil];
     resolve(nil);
   });
@@ -1149,9 +1150,12 @@ RCT_REMAP_METHOD(resume, resumeWithResolver:(RCTPromiseResolveBlock)resolve reje
 
 RCT_REMAP_METHOD(pause, pauseWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
+    NSError *sessionError = nil;
+    [self prepareAudioSession:&sessionError];
     self.manualPause = YES;
     self.interruptedBySystem = NO;
     if (self.player != nil) [self.player pause];
+    LXBeginReceivingRemoteControlEvents();
     [self emitState:@"paused" position:nil duration:nil];
     resolve(nil);
   });
@@ -1929,11 +1933,14 @@ RCT_REMAP_METHOD(resume, resumeStreamWithResolver:(RCTPromiseResolveBlock)resolv
     if (shouldEmitBuffering) {
       [self emitState:@"buffering" position:@(self.lastKnownPosition) duration:@(self.duration)];
     }
+    LXBeginReceivingRemoteControlEvents();
     resolve(nil);
   });
 }
 
 RCT_REMAP_METHOD(pause, pauseStreamWithResolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  NSError *sessionError = nil;
+  [self prepareAudioSession:&sessionError];
   dispatch_sync(self.renderQueue, ^{
     self.lastKnownPosition = [self currentPlaybackPositionLocked];
     self.manualPause = YES;
@@ -1941,6 +1948,7 @@ RCT_REMAP_METHOD(pause, pauseStreamWithResolver:(RCTPromiseResolveBlock)resolve 
     [self.playerNode pause];
     self.playbackStarted = NO;
   });
+  LXBeginReceivingRemoteControlEvents();
   [self emitState:@"paused" position:@(self.lastKnownPosition) duration:@(self.duration)];
   resolve(nil);
 }

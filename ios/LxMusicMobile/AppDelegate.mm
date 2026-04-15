@@ -1113,6 +1113,7 @@ RCT_EXPORT_MODULE();
         BOOL shouldHandle = self.playerNode != nil && (self.playerNode.isPlaying || self.playbackStarted || [self.currentState isEqualToString:@"buffering"]);
         if (!shouldHandle || self.manualPause) return;
         self.lastKnownPosition = [self currentPlaybackPositionLocked];
+        if (self.engine != nil && self.engine.isRunning) [self.engine pause];
         [self.playerNode pause];
         self.playbackStarted = NO;
         shouldEmitPause = YES;
@@ -1591,6 +1592,7 @@ RCT_REMAP_METHOD(pause, pauseStreamWithResolver:(RCTPromiseResolveBlock)resolve 
     self.lastKnownPosition = [self currentPlaybackPositionLocked];
     self.manualPause = YES;
     self.interruptedBySystem = NO;
+    if (self.engine != nil && self.engine.isRunning) [self.engine pause];
     [self.playerNode pause];
     self.playbackStarted = NO;
   });
@@ -2527,6 +2529,10 @@ RCT_REMAP_METHOD(playNowPlaying, playNowPlaying:(NSDictionary *)options resolver
 RCT_REMAP_METHOD(pauseNowPlaying, pauseNowPlaying:(NSDictionary *)options resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   dispatch_async(dispatch_get_main_queue(), ^{
     LXSetNowPlayingPlaybackState(MPNowPlayingPlaybackStatePaused, options);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      if (LXNowPlayingState != MPNowPlayingPlaybackStatePaused) return;
+      LXApplyNowPlayingInfo();
+    });
     resolve(nil);
   });
 }

@@ -7,8 +7,6 @@ import settingState from '@/store/setting/state'
 import { getAccuratePosition, seekToTime } from './seek'
 import { updateNowPlayingInfo } from '@/utils/nativeModules/nowPlaying'
 import {
-  disableTrackPlayerRemoteControls,
-  enableTrackPlayerRemoteControls,
   getNativeFlacDuration,
   getNativeFlacPosition,
   getNativeFlacTrackId,
@@ -288,7 +286,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
   if (Platform.OS == 'ios' && await shouldUseNativeFlacPlayer(musicInfo, url, quality)) {
     global.lx.playerStatus.ignoreTrackPlayerLifecycle = true
     try {
-      await disableTrackPlayerRemoteControls()
       await TrackPlayer.reset().catch(async() => {
         await TrackPlayer.stop().catch(() => {})
       })
@@ -312,7 +309,6 @@ const handlePlayMusic = async(musicInfo: LX.Player.PlayMusic, url: string, time:
   }
   if (Platform.OS == 'ios') {
     await resetNativeFlacPlayback().catch(() => {})
-    await enableTrackPlayerRemoteControls()
   }
   // console.log(tracks, time)
   const tracks = buildTracks(musicInfo, url)

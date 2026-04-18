@@ -21,6 +21,14 @@ export const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
 }
 
+const encodeUriSafe = (uri: string) => {
+  try {
+    return encodeURI(decodeURI(uri))
+  } catch {
+    return encodeURI(uri)
+  }
+}
+
 const normalizeUri = (url?: string | number | null) => {
   if (typeof url != 'string') return url
   if (!url) return url
@@ -31,7 +39,7 @@ const normalizeUri = (url?: string | number | null) => {
   if (uri.startsWith('//')) uri = 'https:' + uri
   if (uri.includes('{size}')) uri = uri.replace(/\{size\}/g, '400')
 
-  return encodeURI(uri)
+  return encodeUriSafe(uri)
 }
 
 const EmptyPic = memo(({ style, nativeID }: { style: ImageProps['style'], nativeID: ImageProps['nativeID'] }) => {
